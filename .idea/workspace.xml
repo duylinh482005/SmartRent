@@ -4,14 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="a8e7bba7-4802-40ee-932e-460b3b90e7b3" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/DEVELOPER_GUIDE.md" beforeDir="false" afterPath="$PROJECT_DIR$/DEVELOPER_GUIDE.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/SmartrentApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/SmartrentApplication.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/dto/request/RoomRequest.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/dto/request/RoomRequest.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/impl/AiServiceImpl.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/impl/AiServiceImpl.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/resources/application.properties" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/resources/application.properties" afterDir="false" />
-    </list>
+    <list default="true" id="a8e7bba7-4802-40ee-932e-460b3b90e7b3" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -96,7 +89,7 @@
       <workItem from="1775187807869" duration="36000" />
       <workItem from="1775202405216" duration="2362000" />
       <workItem from="1775399858279" duration="6843000" />
-      <workItem from="1775445466629" duration="577000" />
+      <workItem from="1775445466629" duration="1224000" />
     </task>
     <servers />
   </component>

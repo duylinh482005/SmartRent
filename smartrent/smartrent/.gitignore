@@ -1,6 +1,11 @@
 HELP.md
 target/
 uploads/
+*.mv.db
+*.trace.db
+.env
+.env.*
+!.env.example
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
