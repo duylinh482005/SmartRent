@@ -1175,7 +1175,7 @@ export default function InvoicePage() {
               <div className="bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">Chi tiết khoản thu</div>
               <div className="divide-y divide-gray-50">
                 <div className="flex justify-between px-4 py-3 text-sm">
-                  <span className="text-gray-600">Tiền phòòng</span>
+                  <span className="text-gray-600">Tiền phòng</span>
                   <span className="font-medium">{formatVnd(detailInvoice.roomFee)}</span>
                 </div>
                 <div className="flex justify-between px-4 py-3 text-sm">

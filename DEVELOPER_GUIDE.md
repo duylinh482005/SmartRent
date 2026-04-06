@@ -47,8 +47,56 @@ Mac dinh frontend goi API tai `http://localhost:8080/api/v1`.
 
 - Profile mac dinh trong backend dang la `mysql`
 - Muon chay nhanh local thi dung `SPRING_PROFILES_ACTIVE=local`
+- Muon bat AI bang OpenAI thi dung them profile `openai`
 - Profile `local` dung H2 file DB tai `smartrent/smartrent_db.mv.db`
 - Upload anh duoc luu trong thu muc `smartrent/uploads`
+
+## Bat AI Assistant
+
+OpenAI:
+
+```powershell
+cd d:\TTCS\smartrent\smartrent
+$env:OPENAI_API_KEY="sk-..."
+$env:SPRING_PROFILES_ACTIVE="local,openai"
+.\mvnw.cmd spring-boot:run
+```
+
+Neu muon luu bien moi truong tren Windows cho cac terminal moi:
+
+```powershell
+setx OPENAI_API_KEY "sk-..."
+```
+
+Luu y:
+
+- Khong commit API key vao `application.properties`, frontend, hoac git
+- AI Assistant cua du an doc key tu bien moi truong `OPENAI_API_KEY`
+- Profile `openai` dang mac dinh model `gpt-5.4-mini`
+
+Groq:
+
+```powershell
+cd d:\TTCS\smartrent\smartrent
+$env:GROQ_API_KEY="gsk_..."
+$env:SPRING_PROFILES_ACTIVE="ai-groq"
+.\mvnw.cmd spring-boot:run
+```
+
+Luu y:
+
+- Chi sua `application-groq.properties` la chua du, backend phai chay voi profile `ai-groq`
+- Khong can sua key trong source code
+- Profile `groq` da map sang OpenAI-compatible API cua Groq
+- Model mac dinh hien tai la `openai/gpt-oss-20b`
+
+Ollama local:
+
+```powershell
+cd d:\TTCS\smartrent\smartrent
+$env:SPRING_PROFILES_ACTIVE="local,ollama"
+.\mvnw.cmd spring-boot:run
+```
 
 ## Auth va routing
 

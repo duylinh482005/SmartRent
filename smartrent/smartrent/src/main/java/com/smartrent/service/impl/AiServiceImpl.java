@@ -7,7 +7,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
+
+import java.util.Arrays;
 
 @Slf4j
 @Service
@@ -16,6 +19,7 @@ public class AiServiceImpl implements AiService {
 
     private final ObjectProvider<ChatClient.Builder> chatClientBuilderProvider;
     private final AiContextService aiContextService;
+    private final Environment environment;
 
     private static final String SYSTEM_PROMPT = """
             Ban la tro ly AI cua he thong quan ly phong tro SmartRent.
@@ -28,9 +32,10 @@ public class AiServiceImpl implements AiService {
     public AiChatResponse chat(String message) {
         ChatClient.Builder chatClientBuilder = chatClientBuilderProvider.getIfAvailable();
         if (chatClientBuilder == null) {
+            log.warn("AI chat is unavailable. Active profiles: {}", Arrays.toString(environment.getActiveProfiles()));
             return AiChatResponse.builder()
                     .question(message)
-                    .answer("Tinh nang AI dang tat. Hay cau hinh OPENAI_API_KEY va SPRING_AI_MODEL_CHAT=openai de su dung.")
+                    .answer("Tinh nang AI chua san sang. Hay chay backend voi profile ai-groq, ai-groq-mysql, ai-openai hoac ai-openai-mysql. Neu dung Groq va muon giu du lieu MySQL hien tai, dung ai-groq-mysql.")
                     .build();
         }
 

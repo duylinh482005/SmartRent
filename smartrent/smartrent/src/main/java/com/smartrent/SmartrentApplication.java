@@ -12,6 +12,29 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableConfigurationProperties
 public class SmartrentApplication {
     public static void main(String[] args) {
+        autoActivateAiProfile();
         SpringApplication.run(SmartrentApplication.class, args);
+    }
+
+    private static void autoActivateAiProfile() {
+        String systemActiveProfiles = System.getProperty("spring.profiles.active");
+        String envActiveProfiles = System.getenv("SPRING_PROFILES_ACTIVE");
+
+        if (hasText(systemActiveProfiles) || hasText(envActiveProfiles)) {
+            return;
+        }
+
+        if (hasText(System.getenv("GROQ_API_KEY"))) {
+            System.setProperty("spring.profiles.active", "ai-groq");
+            return;
+        }
+
+        if (hasText(System.getenv("OPENAI_API_KEY"))) {
+            System.setProperty("spring.profiles.active", "ai-openai");
+        }
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }

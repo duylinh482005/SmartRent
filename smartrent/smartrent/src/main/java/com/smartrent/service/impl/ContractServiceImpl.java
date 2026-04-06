@@ -33,11 +33,11 @@ import java.util.List;
 @Transactional
 public class ContractServiceImpl implements ContractService {
 
-    private static final String ERR_NOT_FOUND = "Kh\u00f4ng t\u00ecm th\u1ea5y h\u1ee3p \u0111\u1ed3ng id: ";
-    private static final String ERR_ACTIVE = "Kh\u00f4ng th\u1ec3 x\u00f3a: H\u1ee3p \u0111\u1ed3ng \u0111ang c\u00f3 hi\u1ec7u l\u1ef1c";
-    private static final String ERR_CURRENT_PERIOD = "Kh\u00f4ng th\u1ec3 x\u00f3a: H\u1ee3p \u0111\u1ed3ng \u0111ang trong k\u1ef3 thanh to\u00e1n hi\u1ec7n t\u1ea1i";
-    private static final String ERR_PAYMENT_HISTORY = "Kh\u00f4ng th\u1ec3 x\u00f3a: H\u1ee3p \u0111\u1ed3ng \u0111\u00e3 ph\u00e1t sinh l\u1ecbch s\u1eed thanh to\u00e1n";
-    private static final String ERR_STATUS_RULE = "Kh\u00f4ng th\u1ec3 x\u00f3a: Ch\u1ec9 cho ph\u00e9p x\u00f3a h\u1ee3p \u0111\u1ed3ng \u0111\u00e3 ch\u1ea5m d\u1ee9t ho\u1eb7c ch\u01b0a \u0111\u1ebfn ng\u00e0y b\u1eaft \u0111\u1ea7u";
+    private static final String ERR_NOT_FOUND = "Không tìm thấy hợp đồng id: ";
+    private static final String ERR_ACTIVE = "Không thể xóa: Hợp đồng đang có hiệu lực";
+    private static final String ERR_CURRENT_PERIOD = "Không thể xóa: Hợp đồng đang trong kỳ thanh toán hiện tại";
+    private static final String ERR_PAYMENT_HISTORY = "Không thể xóa: Hợp đồng đã phát sinh lịch sử thanh toán";
+    private static final String ERR_STATUS_RULE = "Không thể xóa: Chỉ cho phép xóa hợp đồng đã chấm dứt hoặc chưa đến ngày bắt đầu";
 
     private final ContractRepository contractRepository;
     private final RoomRepository roomRepository;
@@ -50,31 +50,31 @@ public class ContractServiceImpl implements ContractService {
         LocalDate today = LocalDate.now();
 
         if (request.getStartDate().isBefore(today)) {
-            throw new RuntimeException("Ngay bat dau hop dong khong duoc o trong qua khu");
+            throw new RuntimeException("Ngày bắt đầu hợp đồng không được ở trong quá khứ");
         }
 
         if (!request.getEndDate().isAfter(request.getStartDate())) {
-            throw new RuntimeException("Ng\u00e0y k\u1ebft th\u00fac ph\u1ea3i sau ng\u00e0y b\u1eaft \u0111\u1ea7u");
+            throw new RuntimeException("Ngày kết thúc phải sau ngày bắt đầu");
         }
 
         if (request.getEndDate().isBefore(request.getStartDate().plusMonths(6))) {
-            throw new RuntimeException("Thoi han hop dong toi thieu la 6 thang");
+            throw new RuntimeException("Thời hạn hợp đồng tối thiểu là 6 tháng");
         }
 
         Room room = roomRepository.findById(request.getRoomId())
-                .orElseThrow(() -> new RuntimeException("Kh\u00f4ng t\u00ecm th\u1ea5y ph\u00f2ng id: " + request.getRoomId()));
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy phòng id: " + request.getRoomId()));
 
         if (room.getStatus() != Room.Status.AVAILABLE) {
-            throw new RuntimeException("Ph\u00f2ng '" + room.getRoomNumber() + "' hi\u1ec7n kh\u00f4ng c\u00f2n tr\u1ed1ng");
+            throw new RuntimeException("Phòng '" + room.getRoomNumber() + "' hiện không còn trống");
         }
 
         contractRepository.findByRoomIdAndStatusAndDeletedFalse(request.getRoomId(), Contract.Status.ACTIVE)
                 .ifPresent(c -> {
-                    throw new RuntimeException("Ph\u00f2ng n\u00e0y \u0111\u00e3 c\u00f3 h\u1ee3p \u0111\u1ed3ng \u0111ang hi\u1ec7u l\u1ef1c (id: " + c.getId() + ")");
+                    throw new RuntimeException("Phòng này đã có hợp đồng đang hiệu lực (id: " + c.getId() + ")");
                 });
 
         Tenant tenant = tenantRepository.findById(request.getTenantId())
-                .orElseThrow(() -> new RuntimeException("Kh\u00f4ng t\u00ecm th\u1ea5y kh\u00e1ch thu\u00ea id: " + request.getTenantId()));
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy khách thuê id: " + request.getTenantId()));
 
         Contract contract = Contract.builder()
                 .room(room)
@@ -126,7 +126,7 @@ public class ContractServiceImpl implements ContractService {
         Contract contract = findById(id);
 
         if (contract.getStatus() != Contract.Status.ACTIVE) {
-            throw new RuntimeException("H\u1ee3p \u0111\u1ed3ng kh\u00f4ng \u1edf tr\u1ea1ng th\u00e1i ACTIVE, kh\u00f4ng th\u1ec3 ch\u1ea5m d\u1ee9t");
+            throw new RuntimeException("Hợp đồng không ở trạng thái ACTIVE, không thể chấm dứt");
         }
 
         contract.setStatus(Contract.Status.TERMINATED);
@@ -189,9 +189,9 @@ public class ContractServiceImpl implements ContractService {
 
         BigDecimal outstandingDebt = invoiceRepository.sumOutstandingByContractId(contractId);
         if (outstandingDebt != null && outstandingDebt.compareTo(BigDecimal.ZERO) > 0) {
-            return "Kh\u00f4ng th\u1ec3 x\u00f3a: Kh\u00e1ch thu\u00ea c\u00f2n n\u1ee3 "
+            return "Không thể xóa: Khách thuê còn nợ "
                     + formatCurrency(outstandingDebt)
-                    + " ch\u01b0a thanh to\u00e1n";
+                    + " chưa thanh toán";
         }
 
         long paymentCount = paymentRepository.countByInvoiceContractId(contractId);
@@ -201,7 +201,7 @@ public class ContractServiceImpl implements ContractService {
 
         long invoiceCount = invoiceRepository.countByContractId(contractId);
         if (invoiceCount > 0) {
-            return "Kh\u00f4ng th\u1ec3 x\u00f3a: H\u1ee3p \u0111\u1ed3ng \u0111\u00e3 ph\u00e1t sinh " + invoiceCount + " h\u00f3a \u0111\u01a1n thanh to\u00e1n";
+            return "Không thể xóa: Hợp đồng đã phát sinh " + invoiceCount + " hóa đơn thanh toán";
         }
 
         if (!isTerminated && !isNotStartedYet) {
@@ -218,7 +218,7 @@ public class ContractServiceImpl implements ContractService {
         symbols.setGroupingSeparator('.');
 
         DecimalFormat formatter = new DecimalFormat("#,###", symbols);
-        return formatter.format(normalized) + "\u0111";
+        return formatter.format(normalized) + "đ";
     }
 
     private String getCurrentUsername() {
