@@ -40,9 +40,9 @@ export default function TenantPage() {
   const parsedTenantId = tenantIdParam ? Number(tenantIdParam) : null;
   const highlightedTenantId = parsedTenantId !== null && !Number.isNaN(parsedTenantId) ? parsedTenantId : null;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading } = useQuery({ // hook của React Query, gọi API lấy dữ liệu
     queryKey: ['tenants'],
-    queryFn:  () => tenantApi.getAll(),
+    queryFn:  () => tenantApi.getAll(), // hàm thực sự gọi API, kết quả trả về lưu vào data
   });
 
   const { data: contractsRes } = useQuery({

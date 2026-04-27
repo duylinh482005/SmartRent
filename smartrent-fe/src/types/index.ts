@@ -5,6 +5,15 @@ export interface AuthResponse {
   role: string;
 }
 
+export interface UserProfile {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
 export interface Property {
   id: number;
   name: string;

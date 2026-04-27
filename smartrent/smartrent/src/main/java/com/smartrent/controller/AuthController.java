@@ -1,8 +1,10 @@
 package com.smartrent.controller;
 
+import com.smartrent.dto.request.ChangePasswordRequest;
 import com.smartrent.dto.request.LoginRequest;
 import com.smartrent.dto.request.RegisterRequest;
 import com.smartrent.dto.response.AuthResponse;
+import com.smartrent.dto.response.UserProfileResponse;
 import com.smartrent.service.AuthService;
 import com.smartrent.util.ApiResponse;
 import jakarta.validation.Valid;
@@ -29,5 +31,17 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthResponse>> login(
             @Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(ApiResponse.success(authService.login(request)));
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<UserProfileResponse>> getCurrentUserProfile() {
+        return ResponseEntity.ok(ApiResponse.success(authService.getCurrentUserProfile()));
+    }
+
+    @PatchMapping("/change-password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @Valid @RequestBody ChangePasswordRequest request) {
+        authService.changePassword(request);
+        return ResponseEntity.ok(ApiResponse.success(null));
     }
 }

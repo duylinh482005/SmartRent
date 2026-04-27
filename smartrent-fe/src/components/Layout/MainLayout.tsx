@@ -7,6 +7,7 @@ import TenantPage from '../../pages/TenantPage.tsx';
 import ContractPage from '../../pages/ContractPage.tsx';
 import InvoicePage from '../../pages/InvoicePage.tsx';
 import AiChatPage from '../../pages/AiChatPage.tsx';
+import ProfilePage from '../../pages/ProfilePage.tsx';
 
 export default function MainLayout() {
   return (
@@ -21,6 +22,7 @@ export default function MainLayout() {
           <Route path="/contracts"   element={<ContractPage />} />
           <Route path="/invoices"    element={<InvoicePage />} />
           <Route path="/ai"          element={<AiChatPage />} />
+          <Route path="/profile"     element={<ProfilePage />} />
         </Routes>
       </main>
     </div>

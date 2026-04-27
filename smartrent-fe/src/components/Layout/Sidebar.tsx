@@ -1,7 +1,7 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, DoorOpen, Users,
-  FileText, Receipt, Bot, LogOut, ChevronRight
+  FileText, Receipt, Bot, LogOut, ChevronRight, UserCircle2
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
@@ -19,6 +19,9 @@ const navItems = [
 export default function Sidebar() {
   const { username, role, logout } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isProfileActive = location.pathname === '/profile';
+  const avatarLetter = username ? username.charAt(0).toUpperCase() : '?';
 
   const handleLogout = () => {
     logout();
@@ -70,15 +73,26 @@ export default function Sidebar() {
 
       {/* User info + Logout */}
       <div className="px-3 py-4 border-t border-primary-800">
-        <div className="flex items-center gap-3 px-3 py-2 mb-2">
+        <button
+          type="button"
+          onClick={() => navigate('/profile')}
+          className={`w-full flex items-center gap-3 px-3 py-2 mb-2 rounded-xl text-left transition ${
+            isProfileActive
+              ? 'bg-primary-800 text-white'
+              : 'hover:bg-primary-800'
+          }`}
+        >
           <div className="w-8 h-8 rounded-full bg-primary-700 flex items-center justify-center text-white text-sm font-medium">
-            {username?.charAt(0).toUpperCase()}
+            {avatarLetter}
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-white text-sm font-medium truncate">{username}</div>
-            <div className="text-primary-400 text-xs">{role}</div>
+            <div className={`${isProfileActive ? 'text-primary-200' : 'text-primary-400'} text-xs`}>
+              {role}
+            </div>
           </div>
-        </div>
+          <UserCircle2 className={`w-4 h-4 flex-shrink-0 ${isProfileActive ? 'text-white' : 'text-primary-300'}`} />
+        </button>
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-primary-300 hover:bg-red-500 hover:text-white transition-all"

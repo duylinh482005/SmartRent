@@ -10,4 +10,5 @@ import java.util.List;
 public interface PropertyRepository extends JpaRepository<Property, Long> {
     List<Property> findByOwnerId(Long ownerId);
     boolean existsByNameAndOwnerId(String name, Long ownerId);
+    boolean existsByNameAndOwnerIdAndIdNot(String name, Long ownerId, Long id);
 }

@@ -17,7 +17,7 @@ import java.util.Arrays;
 @RequiredArgsConstructor
 public class AiServiceImpl implements AiService {
 
-    private final ObjectProvider<ChatClient.Builder> chatClientBuilderProvider;
+    private final ObjectProvider<ChatClient.Builder> chatClientBuilderProvider; // KIỂM TRA AI SẴN SÀNG CHƯA
     private final AiContextService aiContextService;
     private final Environment environment;
 

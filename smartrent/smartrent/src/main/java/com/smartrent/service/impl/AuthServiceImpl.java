@@ -1,8 +1,10 @@
 package com.smartrent.service.impl;
 
+import com.smartrent.dto.request.ChangePasswordRequest;
 import com.smartrent.dto.request.LoginRequest;
 import com.smartrent.dto.request.RegisterRequest;
 import com.smartrent.dto.response.AuthResponse;
+import com.smartrent.dto.response.UserProfileResponse;
 import com.smartrent.entity.User;
 import com.smartrent.repository.UserRepository;
 import com.smartrent.security.JwtUtil;
@@ -10,6 +12,8 @@ import com.smartrent.service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -73,5 +77,46 @@ public class AuthServiceImpl implements AuthService {
                 .email(user.getEmail())
                 .role(user.getRole().name())
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserProfileResponse getCurrentUserProfile() {
+        User user = getCurrentUser();
+
+        return UserProfileResponse.builder()
+                .id(user.getId())
+                .username(user.getUsername())
+                .email(user.getEmail())
+                .role(user.getRole().name())
+                .createdAt(user.getCreatedAt())
+                .updatedAt(user.getUpdatedAt())
+                .build();
+    }
+
+    @Override
+    public void changePassword(ChangePasswordRequest request) {
+        User user = getCurrentUser();
+
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            throw new RuntimeException("Mật khẩu hiện tại không đúng");
+        }
+
+        if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
+            throw new RuntimeException("Mật khẩu mới phải khác mật khẩu hiện tại");
+        }
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+    }
+
+    private User getCurrentUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getName() == null || authentication.getName().isBlank()) {
+            throw new RuntimeException("Không xác định được người dùng hiện tại");
+        }
+
+        return userRepository.findByUsername(authentication.getName())
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy user"));
     }
 }

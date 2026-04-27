@@ -23,7 +23,7 @@ type FormData = z.infer<typeof schema>;
 export default function PropertyPage() {
   const queryClient               = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<Property | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Property | null>(null); // usestate là hook thay đổi dữ liệu, property kiểu dữ liệu
   const [editing, setEditing]     = useState<Property | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -40,9 +40,9 @@ export default function PropertyPage() {
   const openCreate = () => { setEditing(null); reset({}); setModalOpen(true); };
   const openEdit   = (p: Property) => { setEditing(p); reset({ name: p.name, address: p.address, description: p.description }); setModalOpen(true); };
 
-  const saveMutation = useMutation({
-    mutationFn: (data: FormData) => {
-      const payload: PropertyRequest = { ...data, ownerId: 1 }; // ownerId tạm = 1
+  const saveMutation = useMutation({ // hook thay đổi dữ liệu (react query)
+    mutationFn: (data: FormData) => { // nhận data từ form
+      const payload: PropertyRequest = { ...data, ownerId: 1 }; // ownerId tạm = 1 // spread data rồi them id
       return editing
         ? propertyApi.update(editing.id, payload)
         : propertyApi.create(payload);
@@ -155,7 +155,7 @@ export default function PropertyPage() {
 
       {/* Confirm xóa */}
       <ConfirmDialog
-        open={!!deleteTarget}
+        open={!!deleteTarget} // chuyển object thành boolean, nếu có đối tượng thì mở dialog
         title="Xóa khu trọ"
         message={`Bạn có chắc muốn xóa khu trọ "${deleteTarget?.name}"? Hành động này không thể hoàn tác.`}
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}

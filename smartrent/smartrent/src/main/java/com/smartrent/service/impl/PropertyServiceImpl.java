@@ -66,6 +66,12 @@ public class PropertyServiceImpl implements PropertyService {
     @Override
     public PropertyResponse update(Long id, PropertyRequest request) {
         Property property = findById(id);
+
+        if (propertyRepository.existsByNameAndOwnerIdAndIdNot(
+                request.getName(), property.getOwner().getId(), property.getId())) {
+            throw new RuntimeException("Khu trọ '" + request.getName() + "' đã tồn tại");
+        }
+
         property.setName(request.getName());
         property.setAddress(request.getAddress());
         property.setDescription(request.getDescription());
