@@ -6,7 +6,6 @@ export interface InvoiceRequest {
   billingMonth: string;
   electricNew: number;
   waterNew: number;
-  servicePeople: number;
 }
 
 export const invoiceApi = {

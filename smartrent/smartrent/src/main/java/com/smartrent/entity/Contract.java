@@ -33,6 +33,9 @@ public class Contract extends BaseEntity {
     @Column(name = "monthly_rent", nullable = false, precision = 12, scale = 2)
     private BigDecimal monthlyRent;
 
+    @Column(name = "number_of_people")
+    private Integer numberOfPeople;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @Builder.Default

@@ -27,7 +27,6 @@ const schema = z.object({
   billingMonth: z.string().min(1, 'Vui lòng chọn tháng'),
   electricNew:  z.coerce.number().min(0, 'Chỉ số phải >= 0'),
   waterNew:     z.coerce.number().min(0, 'Chỉ số phải >= 0'),
-  servicePeople: z.coerce.number().min(0, 'Số người phải >= 0'),
 });
 
 type FormValues = z.input<typeof schema>;
@@ -251,7 +250,6 @@ export default function InvoicePage() {
       billingMonth: defaultBillingMonth,
       electricNew: 0,
       waterNew: 0,
-      servicePeople: 0,
     },
   });
 
@@ -259,7 +257,6 @@ export default function InvoicePage() {
   const watchedBillingMonth = watch('billingMonth');
   const watchedElectricNew  = Number(watch('electricNew') ?? 0);
   const watchedWaterNew     = Number(watch('waterNew') ?? 0);
-  const watchedServicePeople = Number(watch('servicePeople') ?? 0);
 
   const monthOptions = useMemo(
     () =>
@@ -376,9 +373,10 @@ export default function InvoicePage() {
     && currentWaterUsed > previousMonthInvoice.waterUsed * 1.5,
   );
 
+  const contractNumberOfPeople = selectedContract?.numberOfPeople ?? 0;
   const electricFeePreview = currentElectricUsed * (selectedProperty?.electricUnitPrice ?? 0);
   const waterFeePreview    = currentWaterUsed    * (selectedProperty?.waterUnitPrice ?? 0);
-  const serviceFeePreview  = watchedServicePeople * (selectedProperty?.serviceUnitPrice ?? 0);
+  const serviceFeePreview  = contractNumberOfPeople * (selectedProperty?.serviceUnitPrice ?? 0);
   const networkFeePreview  = selectedProperty?.networkFee ?? 0;
   const totalPreview = (selectedContract?.monthlyRent ?? 0)
     + electricFeePreview + waterFeePreview + serviceFeePreview + networkFeePreview;
@@ -458,15 +456,6 @@ export default function InvoicePage() {
     }
   }, [contractsForCreateRoom, createRoomId, setValue, watchedContractId]);
 
-  useEffect(() => {
-    if (!selectedContract?.id) return;
-    setValue('servicePeople', previousMonthInvoice?.servicePeople ?? 0, { shouldValidate: true });
-  }, [
-    previousMonthInvoice?.servicePeople,
-    selectedContract?.id,
-    selectedMonthKey,
-    setValue,
-  ]);
 
   const resetCreateInvoiceForm = () => {
     reset({
@@ -474,7 +463,6 @@ export default function InvoicePage() {
       billingMonth: defaultBillingMonth,
       electricNew: 0,
       waterNew: 0,
-      servicePeople: 0,
     });
     setCreatePropertyId('');
     setCreateRoomId('');
@@ -489,7 +477,6 @@ export default function InvoicePage() {
         billingMonth: `${form.billingMonth}-01`,
         electricNew:  form.electricNew,
         waterNew:     form.waterNew,
-        servicePeople: form.servicePeople,
       };
       return invoiceApi.create(payload);
     },
@@ -512,7 +499,6 @@ export default function InvoicePage() {
       billingMonth: defaultBillingMonth,
       electricNew: 0,
       waterNew: 0,
-      servicePeople: 0,
     });
     setDuplicateConfirmOpen(false);
     setPendingCreateForm(null);
@@ -1117,16 +1103,15 @@ export default function InvoicePage() {
           <div className="bg-emerald-50 rounded-xl p-4">
             <div className="text-sm font-medium text-emerald-800 mb-3">Dịch vụ chung (thang máy, máy giặt, vệ sinh)</div>
             <div>
-              <label className="block text-xs text-gray-600 mb-1">Số người</label>
-              <input
-                {...register('servicePeople')}
-                type="number" min={0}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-              {errors.servicePeople && <p className="text-red-500 text-xs mt-1">{errors.servicePeople.message}</p>}
-              {watchedServicePeople > 0 && selectedProperty && (
+              <label className="block text-xs text-gray-600 mb-1">Số người (theo hợp đồng)</label>
+              <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-700">
+                {contractNumberOfPeople > 0
+                  ? `${contractNumberOfPeople} người`
+                  : <span className="text-gray-400">Chưa xác định trong hợp đồng</span>}
+              </div>
+              {contractNumberOfPeople > 0 && selectedProperty && (
                 <p className="mt-1.5 text-xs text-emerald-700">
-                  {watchedServicePeople} người × {formatVnd(selectedProperty.serviceUnitPrice)} = <b>{formatVnd(serviceFeePreview)}</b>
+                  {contractNumberOfPeople} người × {formatVnd(selectedProperty.serviceUnitPrice)} = <b>{formatVnd(serviceFeePreview)}</b>
                 </p>
               )}
             </div>

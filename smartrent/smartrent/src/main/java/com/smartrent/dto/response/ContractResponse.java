@@ -21,6 +21,7 @@ public class ContractResponse {
     private LocalDate startDate;
     private LocalDate endDate;
     private BigDecimal monthlyRent;
+    private Integer numberOfPeople;
     private Contract.Status status;
     private LocalDateTime createdAt;
 }

@@ -62,6 +62,7 @@ export interface Contract {
   startDate: string;
   endDate: string;
   monthlyRent: number;
+  numberOfPeople?: number | null;
   status: 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
   createdAt: string;
 }

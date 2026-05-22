@@ -49,6 +49,7 @@ const schema = z
     startDate: z.string().min(1, 'Ngày bắt đầu không được để trống'),
     endDate: z.string().min(1, 'Ngày kết thúc không được để trống'),
     monthlyRent: z.coerce.number().min(1, 'Tiền thuê phải lớn hơn 0'),
+    numberOfPeople: z.coerce.number().min(1, 'Số người phải ít nhất là 1'),
   })
   .refine(data => {
     const startDate = parseDateInput(data.startDate);
@@ -701,15 +702,30 @@ export default function ContractPage() {
             </div>
           </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Tiền thuê hàng tháng (đ)</label>
-            <input
-              {...register('monthlyRent')}
-              type="number"
-              placeholder="VD: 3000000"
-              className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-            {errors.monthlyRent && <p className="mt-1 text-xs text-red-500">{errors.monthlyRent.message}</p>}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Tiền thuê hàng tháng (đ)</label>
+              <input
+                {...register('monthlyRent')}
+                type="number"
+                placeholder="VD: 3000000"
+                className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+              {errors.monthlyRent && <p className="mt-1 text-xs text-red-500">{errors.monthlyRent.message}</p>}
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Số người trong phòng</label>
+              <input
+                {...register('numberOfPeople')}
+                type="number"
+                min={1}
+                placeholder="VD: 2"
+                className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+              {errors.numberOfPeople && <p className="mt-1 text-xs text-red-500">{errors.numberOfPeople.message}</p>}
+              <p className="mt-1 text-xs text-gray-500">Dùng để tính phí dịch vụ chung trong hóa đơn.</p>
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
@@ -921,6 +937,10 @@ export default function ContractPage() {
                 <div className="flex px-4 py-3">
                   <span className="w-40 font-medium text-gray-600">Tiền thuê / tháng</span>
                   <span className="font-semibold text-gray-900">{formatVnd(pendingData.monthlyRent)}</span>
+                </div>
+                <div className="flex px-4 py-3">
+                  <span className="w-40 font-medium text-gray-600">Số người trong phòng</span>
+                  <span className="text-gray-900">{pendingData.numberOfPeople} người</span>
                 </div>
               </div>
 

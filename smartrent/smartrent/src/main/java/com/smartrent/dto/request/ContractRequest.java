@@ -24,4 +24,7 @@ public class ContractRequest {
     @NotNull
     @DecimalMin(value = "0.0", inclusive = false, message = "Tiền thuê phải lớn hơn 0")
     private BigDecimal monthlyRent;
+
+    @Min(value = 1, message = "Số người trong phòng phải ít nhất là 1")
+    private Integer numberOfPeople;
 }

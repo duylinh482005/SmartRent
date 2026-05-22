@@ -7,6 +7,7 @@ export interface ContractRequest {
   startDate: string;
   endDate: string;
   monthlyRent: number;
+  numberOfPeople?: number;
 }
 
 export const contractApi = {

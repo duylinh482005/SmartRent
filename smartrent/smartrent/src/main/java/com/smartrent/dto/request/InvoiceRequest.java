@@ -21,7 +21,4 @@ public class InvoiceRequest {
     @NotNull(message = "Chỉ số nước cuối kỳ không được để trống")
     @Min(value = 0, message = "Chỉ số nước phải >= 0")
     private Integer waterNew;
-
-    @Min(value = 0, message = "Số người dịch vụ phải >= 0")
-    private Integer servicePeople;
 }

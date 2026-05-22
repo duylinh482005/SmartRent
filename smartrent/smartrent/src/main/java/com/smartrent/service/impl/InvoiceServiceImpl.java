@@ -84,7 +84,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                     "Chỉ số nước (" + request.getWaterNew() + ") nhỏ hơn chỉ số tháng trước (" + waterOld + ")");
         }
 
-        int servicePeople = request.getServicePeople() != null ? request.getServicePeople() : 0;
+        int servicePeople = contract.getNumberOfPeople() != null ? contract.getNumberOfPeople() : 0;
         int electricUsed = request.getElectricNew() - electricOld;
         int waterUsed = request.getWaterNew() - waterOld;
 

@@ -79,6 +79,7 @@ public class ContractServiceImpl implements ContractService {
                 .startDate(request.getStartDate())
                 .endDate(request.getEndDate())
                 .monthlyRent(request.getMonthlyRent())
+                .numberOfPeople(request.getNumberOfPeople())
                 .status(Contract.Status.ACTIVE)
                 .build();
 
@@ -261,6 +262,7 @@ public class ContractServiceImpl implements ContractService {
                 .startDate(c.getStartDate())
                 .endDate(c.getEndDate())
                 .monthlyRent(c.getMonthlyRent())
+                .numberOfPeople(c.getNumberOfPeople())
                 .status(c.getStatus())
                 .createdAt(c.getCreatedAt())
                 .build();
