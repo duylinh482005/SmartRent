@@ -4,6 +4,7 @@ import com.smartrent.dto.request.InvoiceRequest;
 import com.smartrent.dto.response.InvoiceResponse;
 import com.smartrent.entity.Contract;
 import com.smartrent.entity.Invoice;
+import com.smartrent.entity.Property;
 import com.smartrent.repository.ContractRepository;
 import com.smartrent.repository.InvoiceRepository;
 import com.smartrent.service.InvoiceService;
@@ -28,11 +29,6 @@ import java.util.List;
 @RequiredArgsConstructor
 @Transactional
 public class InvoiceServiceImpl implements InvoiceService {
-
-    private static final BigDecimal DEFAULT_ELECTRIC_PRICE = new BigDecimal("3500");
-    private static final BigDecimal DEFAULT_WATER_PRICE = new BigDecimal("15000");
-    private static final BigDecimal DEFAULT_SERVICE_PRICE = BigDecimal.ZERO;
-    private static final BigDecimal DEFAULT_NETWORK_PRICE = BigDecimal.ZERO;
 
     private static final String ERR_NOT_FOUND = "Không tìm thấy hóa đơn id: ";
     private static final String ERR_EDIT_PAID = "Không thể sửa: Hóa đơn đã thanh toán, liên hệ admin để điều chỉnh";
@@ -61,26 +57,36 @@ public class InvoiceServiceImpl implements InvoiceService {
                     + " đã được tạo cho hợp đồng này");
         }
 
-        if (request.getElectricNew() < request.getElectricOld()) {
-            throw new RuntimeException("Chỉ số điện cuối kỳ phải >= đầu kỳ");
+        // Lấy đơn giá từ khu trọ
+        Property property = contract.getRoom().getProperty();
+        BigDecimal electricPrice = property.getElectricUnitPrice();
+        BigDecimal waterPrice = property.getWaterUnitPrice();
+        BigDecimal servicePrice = property.getServiceUnitPrice();
+        BigDecimal networkPrice = property.getNetworkFee();
+
+        // Lấy chỉ số đầu kỳ từ hóa đơn tháng trước (nếu có)
+        Invoice previousInvoice = invoiceRepository
+                .findTopByContractIdAndBillingMonthLessThanAndDeletedFalseOrderByBillingMonthDesc(
+                        request.getContractId(), request.getBillingMonth())
+                .orElse(null);
+
+        int electricOld = (previousInvoice != null && previousInvoice.getElectricNew() != null)
+                ? previousInvoice.getElectricNew() : 0;
+        int waterOld = (previousInvoice != null && previousInvoice.getWaterNew() != null)
+                ? previousInvoice.getWaterNew() : 0;
+
+        if (request.getElectricNew() < electricOld) {
+            throw new RuntimeException(
+                    "Chỉ số điện (" + request.getElectricNew() + ") nhỏ hơn chỉ số tháng trước (" + electricOld + ")");
         }
-        if (request.getWaterNew() < request.getWaterOld()) {
-            throw new RuntimeException("Chỉ số nước cuối kỳ phải >= đầu kỳ");
+        if (request.getWaterNew() < waterOld) {
+            throw new RuntimeException(
+                    "Chỉ số nước (" + request.getWaterNew() + ") nhỏ hơn chỉ số tháng trước (" + waterOld + ")");
         }
 
-        BigDecimal electricPrice = request.getElectricUnitPrice() != null
-                ? request.getElectricUnitPrice() : DEFAULT_ELECTRIC_PRICE;
-        BigDecimal waterPrice = request.getWaterUnitPrice() != null
-                ? request.getWaterUnitPrice() : DEFAULT_WATER_PRICE;
-        int servicePeople = request.getServicePeople() != null
-                ? request.getServicePeople() : 0;
-        BigDecimal servicePrice = request.getServiceUnitPrice() != null
-                ? request.getServiceUnitPrice() : DEFAULT_SERVICE_PRICE;
-        BigDecimal networkPrice = request.getNetworkUnitPrice() != null
-                ? request.getNetworkUnitPrice() : DEFAULT_NETWORK_PRICE;
-
-        int electricUsed = request.getElectricNew() - request.getElectricOld();
-        int waterUsed = request.getWaterNew() - request.getWaterOld();
+        int servicePeople = request.getServicePeople() != null ? request.getServicePeople() : 0;
+        int electricUsed = request.getElectricNew() - electricOld;
+        int waterUsed = request.getWaterNew() - waterOld;
 
         BigDecimal roomFee = contract.getMonthlyRent();
         BigDecimal electricFee = electricPrice.multiply(BigDecimal.valueOf(electricUsed));
@@ -97,11 +103,11 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .contract(contract)
                 .billingMonth(request.getBillingMonth())
                 .roomFee(roomFee)
-                .electricOld(request.getElectricOld())
+                .electricOld(electricOld)
                 .electricNew(request.getElectricNew())
                 .electricUnitPrice(electricPrice)
                 .electricFee(electricFee)
-                .waterOld(request.getWaterOld())
+                .waterOld(waterOld)
                 .waterNew(request.getWaterNew())
                 .waterUnitPrice(waterPrice)
                 .waterFee(waterFee)

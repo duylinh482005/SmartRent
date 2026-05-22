@@ -6,6 +6,10 @@ export interface PropertyRequest {
   address: string;
   description?: string;
   ownerId: number;
+  electricUnitPrice?: number;
+  waterUnitPrice?: number;
+  serviceUnitPrice?: number;
+  networkFee?: number;
 }
 
 export const propertyApi = {

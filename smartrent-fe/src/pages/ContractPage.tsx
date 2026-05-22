@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { FileText, Plus, Trash2, XCircle } from 'lucide-react';
+import { FileText, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { contractApi, type ContractRequest } from '../api/contractApi';
@@ -165,8 +165,12 @@ export default function ContractPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Contract | null>(null);
   const [terminateTarget, setTerminateTarget] = useState<Contract | null>(null);
+  const [renewTarget, setRenewTarget] = useState<Contract | null>(null);
+  const [renewNewEndDate, setRenewNewEndDate] = useState('');
   const [selectedProperty, setSelectedProperty] = useState<number | ''>('');
   const [quickTenantModalOpen, setQuickTenantModalOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [pendingData, setPendingData] = useState<FormData | null>(null);
 
   const [tenantSearch, setTenantSearch] = useState('');
   const [propertyFilter, setPropertyFilter] = useState('');
@@ -339,6 +343,17 @@ export default function ContractPage() {
     },
   });
 
+  const renewMutation = useMutation({
+    mutationFn: ({ id, newEndDate }: { id: number; newEndDate: string }) =>
+      contractApi.renew(id, newEndDate),
+    onSuccess: () => {
+      toast.success('Gia hạn hợp đồng thành công!');
+      queryClient.invalidateQueries({ queryKey: ['contracts'] });
+      setRenewTarget(null);
+      setRenewNewEndDate('');
+    },
+  });
+
   const quickCreateTenantMutation = useMutation({
     mutationFn: (tenantData: QuickTenantFormData) =>
       tenantApi.create({
@@ -356,6 +371,32 @@ export default function ContractPage() {
       resetQuickTenant({});
     },
   });
+
+  const isInLastMonth = (endDate: string): boolean => {
+    const end = parseDateInput(endDate);
+    if (!end) return false;
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 && diffDays <= 30;
+  };
+
+  const handleFormReview = (formData: FormData) => {
+    setPendingData(formData);
+    setModalOpen(false);
+    setReviewOpen(true);
+  };
+
+  const handleConfirmCreate = () => {
+    if (!pendingData) return;
+    saveMutation.mutate(pendingData);
+    setReviewOpen(false);
+  };
+
+  const handleCancelReview = () => {
+    setReviewOpen(false);
+    setModalOpen(true);
+  };
 
   const toggleStatusFilter = (status: Contract['status']) => {
     setStatusFilters(prev =>
@@ -530,6 +571,15 @@ export default function ContractPage() {
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex justify-end gap-1">
+                          {contract.status === 'ACTIVE' && isInLastMonth(contract.endDate) && (
+                            <button
+                              onClick={() => { setRenewTarget(contract); setRenewNewEndDate(''); }}
+                              title="Gia hạn hợp đồng"
+                              className="flex h-7 w-7 items-center justify-center rounded-lg transition hover:bg-blue-50"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5 text-blue-400" />
+                            </button>
+                          )}
                           {contract.status === 'ACTIVE' && (
                             <button
                               onClick={() => setTerminateTarget(contract)}
@@ -565,7 +615,7 @@ export default function ContractPage() {
         }}
         size="lg"
       >
-        <form onSubmit={handleSubmit(formData => saveMutation.mutate(formData))} className="space-y-4">
+        <form onSubmit={handleSubmit(handleFormReview)} className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Khu trọ</label>
             <select
@@ -777,6 +827,153 @@ export default function ContractPage() {
         onClose={() => setDeleteTarget(null)}
         loading={deleteMutation.isPending}
       />
+
+      {/* Modal gia hạn hợp đồng */}
+      <Modal
+        open={!!renewTarget}
+        title="Gia hạn hợp đồng"
+        onClose={() => { setRenewTarget(null); setRenewNewEndDate(''); }}
+      >
+        {renewTarget && (
+          <div className="space-y-4">
+            <div className="rounded-xl bg-blue-50 p-4 text-sm text-blue-800 space-y-1">
+              <p><span className="font-medium">Phòng:</span> {renewTarget.roomNumber} — {renewTarget.propertyName}</p>
+              <p><span className="font-medium">Khách thuê:</span> {renewTarget.tenantName}</p>
+              <p><span className="font-medium">Hạn hiện tại:</span> {formatDate(renewTarget.endDate)}</p>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Ngày kết thúc mới</label>
+              <input
+                type="date"
+                value={renewNewEndDate}
+                min={(() => {
+                  const d = parseDateInput(renewTarget.endDate);
+                  if (!d) return '';
+                  d.setDate(d.getDate() + 1);
+                  return toDateOnlyValue(d);
+                })()}
+                onChange={e => setRenewNewEndDate(e.target.value)}
+                className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+              <p className="mt-1 text-xs text-gray-500">Phải sau ngày kết thúc hiện tại.</p>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => { setRenewTarget(null); setRenewNewEndDate(''); }}
+                className="rounded-xl border border-gray-200 px-4 py-2 text-sm transition hover:bg-gray-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={!renewNewEndDate || renewMutation.isPending}
+                onClick={() => renewMutation.mutate({ id: renewTarget.id, newEndDate: renewNewEndDate })}
+                className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm text-white transition hover:bg-blue-700 disabled:opacity-50"
+              >
+                {renewMutation.isPending && (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                )}
+                Xác nhận gia hạn
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal xác nhận trước khi tạo hợp đồng */}
+      <Modal
+        open={reviewOpen}
+        title="Xác nhận thông tin hợp đồng"
+        onClose={handleCancelReview}
+        size="lg"
+      >
+        {pendingData && (() => {
+          const roomInfo = availableRooms.find(r => r.id === pendingData.roomId);
+          const tenantInfo = tenants.find(t => t.id === pendingData.tenantId);
+          const propertyInfo = properties.find(p => p.id === roomInfo?.propertyId);
+          return (
+            <div className="space-y-5">
+              <p className="text-sm text-gray-500">Vui lòng kiểm tra kỹ thông tin trước khi tạo hợp đồng. Hợp đồng sau khi tạo sẽ không thể chỉnh sửa.</p>
+              <div className="rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden text-sm">
+                <div className="flex px-4 py-3">
+                  <span className="w-40 font-medium text-gray-600">Khu trọ</span>
+                  <span className="text-gray-900">{roomInfo?.propertyName ?? '—'}</span>
+                </div>
+                <div className="flex px-4 py-3">
+                  <span className="w-40 font-medium text-gray-600">Phòng</span>
+                  <span className="text-gray-900">{roomInfo?.roomNumber ?? pendingData.roomId}</span>
+                </div>
+                <div className="flex px-4 py-3">
+                  <span className="w-40 font-medium text-gray-600">Khách thuê</span>
+                  <span className="text-gray-900">
+                    {tenantInfo ? `${tenantInfo.fullName} — ${tenantInfo.phone}` : pendingData.tenantId}
+                  </span>
+                </div>
+                <div className="flex px-4 py-3">
+                  <span className="w-40 font-medium text-gray-600">Ngày bắt đầu</span>
+                  <span className="text-gray-900">{formatDate(pendingData.startDate)}</span>
+                </div>
+                <div className="flex px-4 py-3">
+                  <span className="w-40 font-medium text-gray-600">Ngày kết thúc</span>
+                  <span className="text-gray-900">{formatDate(pendingData.endDate)}</span>
+                </div>
+                <div className="flex px-4 py-3">
+                  <span className="w-40 font-medium text-gray-600">Tiền thuê / tháng</span>
+                  <span className="font-semibold text-gray-900">{formatVnd(pendingData.monthlyRent)}</span>
+                </div>
+              </div>
+
+              {propertyInfo && (
+                <div className="rounded-xl border border-amber-200 overflow-hidden text-sm">
+                  <div className="bg-amber-100 px-4 py-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-amber-800">Đơn giá niêm yết theo khu trọ</span>
+                  </div>
+                  <div className="divide-y divide-amber-100 bg-amber-50">
+                    <div className="flex px-4 py-3">
+                      <span className="w-48 font-medium text-amber-700">Đơn giá điện</span>
+                      <span className="text-gray-900">{formatVnd(propertyInfo.electricUnitPrice)} / kWh</span>
+                    </div>
+                    <div className="flex px-4 py-3">
+                      <span className="w-48 font-medium text-amber-700">Đơn giá nước</span>
+                      <span className="text-gray-900">{formatVnd(propertyInfo.waterUnitPrice)} / m³</span>
+                    </div>
+                    <div className="flex px-4 py-3">
+                      <span className="w-48 font-medium text-amber-700">Dịch vụ chung</span>
+                      <span className="text-gray-900">{formatVnd(propertyInfo.serviceUnitPrice)} / người / tháng</span>
+                    </div>
+                    <div className="flex px-4 py-3">
+                      <span className="w-48 font-medium text-amber-700">Mạng internet</span>
+                      <span className="text-gray-900">{formatVnd(propertyInfo.networkFee)} / phòng / tháng</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={handleCancelReview}
+                  className="rounded-xl border border-gray-200 px-4 py-2 text-sm transition hover:bg-gray-50"
+                >
+                  Quay lại chỉnh sửa
+                </button>
+                <button
+                  type="button"
+                  disabled={saveMutation.isPending}
+                  onClick={handleConfirmCreate}
+                  className="flex items-center gap-2 rounded-xl bg-primary-800 px-4 py-2 text-sm text-white transition hover:bg-primary-900 disabled:opacity-50"
+                >
+                  {saveMutation.isPending && (
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  )}
+                  Xác nhận tạo hợp đồng
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 }

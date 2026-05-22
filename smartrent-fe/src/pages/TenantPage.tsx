@@ -200,7 +200,7 @@ export default function TenantPage() {
                               key={contract.id}
                               className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700"
                             >
-                              HD #{contract.id} - P{contract.roomNumber} ({CONTRACT_STATUS_LABELS[contract.status] ?? contract.status})
+                              HD #{contract.id} · P{contract.roomNumber} · {contract.propertyName} ({CONTRACT_STATUS_LABELS[contract.status] ?? contract.status})
                             </span>
                           ))}
                         </div>

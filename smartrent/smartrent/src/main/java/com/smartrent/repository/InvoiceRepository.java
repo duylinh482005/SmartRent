@@ -25,6 +25,8 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
 
     boolean existsByContractIdAndBillingMonthAndDeletedFalse(Long contractId, LocalDate billingMonth);
 
+    Optional<Invoice> findTopByContractIdAndBillingMonthLessThanAndDeletedFalseOrderByBillingMonthDesc(Long contractId, LocalDate billingMonth);
+
     List<Invoice> findByContractIdAndStatusAndDeletedFalse(Long contractId, Invoice.Status status);
 
     @Query("""
@@ -55,4 +57,15 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
           AND i.deleted = false
     """)
     java.math.BigDecimal sumOutstandingByContractId(@Param("contractId") Long contractId);
+
+    @Query("""
+        SELECT i FROM Invoice i
+        JOIN FETCH i.contract c
+        JOIN FETCH c.room r
+        JOIN FETCH r.property p
+        JOIN FETCH c.tenant t
+        WHERE i.deleted = false
+          AND i.billingMonth >= :fromMonth
+    """)
+    List<Invoice> findAllNonDeletedSinceWithDetails(@Param("fromMonth") LocalDate fromMonth);
 }

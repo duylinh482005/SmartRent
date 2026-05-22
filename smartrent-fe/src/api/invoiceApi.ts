@@ -4,15 +4,9 @@ import type { ApiResponse, Invoice } from '../types';
 export interface InvoiceRequest {
   contractId: number;
   billingMonth: string;
-  electricOld: number;
   electricNew: number;
-  waterOld: number;
   waterNew: number;
-  electricUnitPrice?: number;
-  waterUnitPrice?: number;
   servicePeople: number;
-  serviceUnitPrice?: number;
-  networkUnitPrice?: number;
 }
 
 export const invoiceApi = {

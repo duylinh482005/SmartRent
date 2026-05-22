@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Bot, Send, User, Trash2, Lightbulb } from 'lucide-react';
+import { Bot, Send, User, Trash2, Lightbulb, TrendingUp, BarChart2, Bell, Wrench } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { aiApi } from '../api/aiApi';
 import PageHeader from '../components/ui/PageHeader';
@@ -11,31 +11,75 @@ interface Message {
   timestamp: Date;
 }
 
-// Câu hỏi gợi ý
-const SUGGESTIONS = [
-  'Phòng nào chưa thanh toán tiền phòng?',
-  'Hiện có bao nhiêu phòng còn trống?',
-  'Hợp đồng nào sắp hết hạn trong 30 ngày?',
-  'Tổng tiền chưa thu là bao nhiêu?',
-  'Cho tôi xem tổng quan khu trọ hiện tại',
-  'Khách nào đang thuê phòng đắt nhất?',
+interface SuggestionItem {
+  label: string;
+  message: string;
+}
+
+interface SuggestionCategory {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  items: SuggestionItem[];
+}
+
+const SUGGESTION_CATEGORIES: SuggestionCategory[] = [
+  {
+    id: 'revenue',
+    label: 'Doanh thu',
+    icon: TrendingUp,
+    items: [
+      { label: 'Tháng này vs tháng trước',   message: 'So sánh doanh thu tháng này với tháng trước' },
+      { label: 'Doanh thu theo quý',          message: 'Doanh thu theo quý năm nay như thế nào?' },
+      { label: 'Tổng quan tài chính',         message: 'Phân tích tình hình tổng thể và cho tôi lời khuyên' },
+    ],
+  },
+  {
+    id: 'analysis',
+    label: 'Phân tích',
+    icon: BarChart2,
+    items: [
+      { label: 'Phòng trống lâu nhất',        message: 'Phòng nào đang trống quá lâu? Tôi đang bị mất bao nhiêu tiền?' },
+      { label: 'Khách hay trễ hạn',           message: 'Khách thuê nào hay trễ hạn thanh toán?' },
+      { label: 'Khu trọ hiệu quả nhất',       message: 'Khu trọ nào đang hoạt động hiệu quả nhất?' },
+    ],
+  },
+  {
+    id: 'alerts',
+    label: 'Cảnh báo',
+    icon: Bell,
+    items: [
+      { label: 'HĐ sắp hết hạn',             message: 'Hợp đồng nào sắp hết hạn, tôi cần làm gì?' },
+      { label: 'Hóa đơn chưa tạo',           message: 'Hóa đơn nào chưa được tạo tháng này?' },
+      { label: 'Tổng tiền chưa thu',          message: 'Tổng tiền chưa thu và quá hạn là bao nhiêu?' },
+    ],
+  },
+  {
+    id: 'actions',
+    label: 'Hành động',
+    icon: Wrench,
+    items: [
+      { label: 'Đánh dấu đã thu',            message: 'Đánh dấu đã thanh toán hóa đơn' },
+      { label: 'Chấm dứt hợp đồng',          message: 'Chấm dứt hợp đồng' },
+    ],
+  },
 ];
 
 export default function AiChatPage() {
-  const [messages, setMessages]   = useState<Message[]>([
+  const [messages, setMessages]             = useState<Message[]>([
     {
       id: 0,
       role: 'assistant',
-      content: 'Xin chào! Tôi là trợ lý AI của SmartRent. Tôi có thể giúp bạn tra cứu thông tin về phòng trọ, hóa đơn, hợp đồng và khách thuê. Hãy hỏi tôi bất cứ điều gì!',
+      content: 'Xin chào! Tôi là trợ lý AI của SmartRent. Tôi có thể giúp bạn tra cứu thông tin, phân tích doanh thu, phát hiện vấn đề và đưa ra lời khuyên quản lý phòng trọ. Hãy hỏi tôi bất cứ điều gì!',
       timestamp: new Date(),
     }
   ]);
-  const [input, setInput]         = useState('');
-  const [loading, setLoading]     = useState(false);
-  const bottomRef                 = useRef<HTMLDivElement>(null);
-  const inputRef                  = useRef<HTMLInputElement>(null);
+  const [input, setInput]                   = useState('');
+  const [loading, setLoading]               = useState(false);
+  const [activeCategory, setActiveCategory] = useState('revenue');
+  const bottomRef                           = useRef<HTMLDivElement>(null);
+  const inputRef                            = useRef<HTMLInputElement>(null);
 
-  // Auto scroll xuống tin nhắn mới nhất
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -54,7 +98,6 @@ export default function AiChatPage() {
     setInput('');
     setLoading(true);
 
-    // Thêm tin nhắn loading
     const loadingId = Date.now() + 1;
     setMessages(prev => [...prev, {
       id: loadingId,
@@ -66,8 +109,6 @@ export default function AiChatPage() {
     try {
       const res = await aiApi.chat(text.trim());
       const answer = res.data.data.answer;
-
-      // Thay loading bằng câu trả lời thật
       setMessages(prev => prev.map(m =>
         m.id === loadingId ? { ...m, content: answer } : m
       ));
@@ -101,6 +142,8 @@ export default function AiChatPage() {
   const formatTime = (date: Date) =>
     date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
+  const activeCategoryData = SUGGESTION_CATEGORIES.find(c => c.id === activeCategory)!;
+
   return (
     <div className="p-6 h-screen flex flex-col">
       <PageHeader
@@ -125,12 +168,8 @@ export default function AiChatPage() {
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.map(msg => (
               <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-
-                {/* Avatar */}
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                  msg.role === 'assistant'
-                    ? 'bg-primary-100'
-                    : 'bg-gray-100'
+                  msg.role === 'assistant' ? 'bg-primary-100' : 'bg-gray-100'
                 }`}>
                   {msg.role === 'assistant'
                     ? <Bot className="w-4 h-4 text-primary-700" />
@@ -138,7 +177,6 @@ export default function AiChatPage() {
                   }
                 </div>
 
-                {/* Bubble */}
                 <div className={`max-w-[75%] ${msg.role === 'user' ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                   <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
                     msg.role === 'assistant'
@@ -152,7 +190,6 @@ export default function AiChatPage() {
                         <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
                     ) : (
-                      // Render xuống dòng
                       msg.content.split('\n').map((line, i) => (
                         <p key={i} className={i > 0 ? 'mt-1' : ''}>{line}</p>
                       ))
@@ -174,7 +211,7 @@ export default function AiChatPage() {
                 ref={inputRef}
                 value={input}
                 onChange={e => setInput(e.target.value)}
-                placeholder="Nhập câu hỏi... VD: Phòng nào chưa thanh toán?"
+                placeholder="Nhập câu hỏi..."
                 disabled={loading}
                 className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-gray-50"
               />
@@ -190,38 +227,63 @@ export default function AiChatPage() {
         </div>
 
         {/* Suggestions sidebar */}
-        <div className="w-56 flex-shrink-0">
+        <div className="w-52 flex-shrink-0 flex flex-col gap-3">
+
+          {/* Category tabs + items */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
             <div className="flex items-center gap-2 mb-3">
               <Lightbulb className="w-4 h-4 text-yellow-500" />
-              <span className="text-sm font-medium text-gray-700">Gợi ý câu hỏi</span>
+              <span className="text-sm font-medium text-gray-700">Gợi ý</span>
             </div>
-            <div className="space-y-2">
-              {SUGGESTIONS.map((s, i) => (
+
+            {/* 2×2 category tab grid */}
+            <div className="grid grid-cols-2 gap-1.5 mb-3">
+              {SUGGESTION_CATEGORIES.map(cat => {
+                const Icon = cat.icon;
+                const isActive = activeCategory === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => setActiveCategory(cat.id)}
+                    className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      isActive
+                        ? 'bg-primary-800 text-white shadow-sm'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                    }`}
+                  >
+                    <Icon className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate">{cat.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Items for active category */}
+            <div className="space-y-1.5">
+              {activeCategoryData.items.map((item, i) => (
                 <button
                   key={i}
-                  onClick={() => sendMessage(s)}
+                  onClick={() => sendMessage(item.message)}
                   disabled={loading}
-                  className="w-full text-left text-xs text-gray-600 bg-gray-50 hover:bg-primary-50 hover:text-primary-800 px-3 py-2.5 rounded-xl transition disabled:opacity-50 leading-relaxed"
+                  className="w-full text-left text-xs text-gray-600 bg-gray-50 hover:bg-primary-50 hover:text-primary-800 px-3 py-2 rounded-xl transition disabled:opacity-50 leading-snug"
                 >
-                  {s}
+                  {item.label}
                 </button>
               ))}
             </div>
           </div>
 
           {/* Tips */}
-          <div className="bg-blue-50 rounded-2xl border border-blue-100 p-4 mt-3">
+          <div className="bg-blue-50 rounded-2xl border border-blue-100 p-3.5">
             <div className="text-xs font-medium text-blue-800 mb-2">Mẹo sử dụng</div>
             <ul className="text-xs text-blue-700 space-y-1.5">
-              <li>• Hỏi về số liệu cụ thể</li>
-              <li>• Hỏi về tình trạng phòng</li>
-              <li>• Tra cứu hóa đơn nợ</li>
-              <li>• Kiểm tra hợp đồng</li>
+              <li>• Hỏi so sánh theo tháng/quý</li>
+              <li>• Hỏi lý do và giải pháp</li>
+              <li>• Nhờ tư vấn cụ thể</li>
             </ul>
           </div>
-        </div>
 
+        </div>
       </div>
     </div>
   );

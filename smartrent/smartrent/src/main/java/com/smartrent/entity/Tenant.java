@@ -3,6 +3,7 @@ package com.smartrent.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -28,4 +29,14 @@ public class Tenant extends BaseEntity {
     @OneToMany(mappedBy = "tenant", cascade = CascadeType.ALL)
     @Builder.Default
     private List<Contract> contracts = new ArrayList<>();
+
+    @Column(name = "is_deleted", nullable = false)
+    @Builder.Default
+    private boolean deleted = false;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    @Column(name = "deleted_by", length = 100)
+    private String deletedBy;
 }

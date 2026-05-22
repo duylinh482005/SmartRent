@@ -2,13 +2,18 @@ package com.smartrent.service.impl;
 
 import com.smartrent.dto.request.TenantRequest;
 import com.smartrent.dto.response.TenantResponse;
+import com.smartrent.entity.Contract;
 import com.smartrent.entity.Tenant;
+import com.smartrent.repository.ContractRepository;
 import com.smartrent.repository.TenantRepository;
 import com.smartrent.service.TenantService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -17,6 +22,7 @@ import java.util.List;
 public class TenantServiceImpl implements TenantService {
 
     private final TenantRepository tenantRepository;
+    private final ContractRepository contractRepository;
 
     @Override
     public TenantResponse create(TenantRequest request) {
@@ -47,7 +53,7 @@ public class TenantServiceImpl implements TenantService {
     @Override
     @Transactional(readOnly = true)
     public List<TenantResponse> getAll() {
-        return tenantRepository.findAll().stream()
+        return tenantRepository.findByDeletedFalse().stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -56,8 +62,7 @@ public class TenantServiceImpl implements TenantService {
     public TenantResponse update(Long id, TenantRequest request) {
         Tenant tenant = findById(id);
 
-        // Kiểm tra phone trùng với người khác
-        tenantRepository.findByPhone(request.getPhone()).ifPresent(existing -> {
+        tenantRepository.findByPhoneAndDeletedFalse(request.getPhone()).ifPresent(existing -> {
             if (!existing.getId().equals(id)) {
                 throw new RuntimeException("Số điện thoại '" + request.getPhone() + "' đã được dùng");
             }
@@ -73,12 +78,34 @@ public class TenantServiceImpl implements TenantService {
 
     @Override
     public void delete(Long id) {
-        tenantRepository.delete(findById(id));
+        Tenant tenant = findById(id);
+
+        if (contractRepository.existsByTenantIdAndStatusAndDeletedFalse(id, Contract.Status.ACTIVE)) {
+            throw new RuntimeException(
+                    "Không thể xóa khách thuê đang có hợp đồng hiệu lực. Hãy chấm dứt hợp đồng trước.");
+        }
+
+        tenant.setDeleted(true);
+        tenant.setDeletedAt(LocalDateTime.now());
+        tenant.setDeletedBy(getCurrentUsername());
+        tenantRepository.save(tenant);
     }
 
     private Tenant findById(Long id) {
-        return tenantRepository.findById(id)
+        return tenantRepository.findByIdAndDeletedFalse(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy khách thuê id: " + id));
+    }
+
+    private String getCurrentUsername() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return "system";
+        }
+        String username = authentication.getName();
+        if (username == null || username.isBlank() || "anonymousUser".equalsIgnoreCase(username)) {
+            return "system";
+        }
+        return username;
     }
 
     private TenantResponse toResponse(Tenant t) {

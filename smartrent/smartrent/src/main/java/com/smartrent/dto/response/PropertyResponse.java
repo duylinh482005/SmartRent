@@ -3,6 +3,7 @@ package com.smartrent.dto.response;
 import lombok.Builder;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -15,5 +16,9 @@ public class PropertyResponse {
     private Long ownerId;
     private String ownerUsername;
     private int totalRooms;
+    private BigDecimal electricUnitPrice;
+    private BigDecimal waterUnitPrice;
+    private BigDecimal serviceUnitPrice;
+    private BigDecimal networkFee;
     private LocalDateTime createdAt;
 }

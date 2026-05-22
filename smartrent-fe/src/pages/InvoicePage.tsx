@@ -23,23 +23,11 @@ import type { Contract, Invoice } from '../types';
 import { formatDate, formatMonth, formatVnd, getInvoiceStatusColor } from '../utils/format';
 
 const schema = z.object({
-  contractId: z.coerce.number().min(1, 'Vui lòng chọn hợp đồng'),
+  contractId:   z.coerce.number().min(1, 'Vui lòng chọn hợp đồng'),
   billingMonth: z.string().min(1, 'Vui lòng chọn tháng'),
-  electricOld: z.coerce.number().min(0, 'Chỉ số phải >= 0'),
-  electricNew: z.coerce.number().min(0, 'Chỉ số phải >= 0'),
-  waterOld: z.coerce.number().min(0, 'Chỉ số phải >= 0'),
-  waterNew: z.coerce.number().min(0, 'Chỉ số phải >= 0'),
-  electricUnitPrice: z.coerce.number().optional(),
-  waterUnitPrice: z.coerce.number().optional(),
+  electricNew:  z.coerce.number().min(0, 'Chỉ số phải >= 0'),
+  waterNew:     z.coerce.number().min(0, 'Chỉ số phải >= 0'),
   servicePeople: z.coerce.number().min(0, 'Số người phải >= 0'),
-  serviceUnitPrice: z.coerce.number().min(0, 'Đơn giá phải >= 0').optional(),
-  networkUnitPrice: z.coerce.number().min(0, 'Đơn giá phải >= 0').optional(),
-}).refine((d) => d.electricNew >= d.electricOld, {
-  message: 'Chỉ số điện mới phải >= chỉ số điện cũ',
-  path: ['electricNew'],
-}).refine((d) => d.waterNew >= d.waterOld, {
-  message: 'Chỉ số nước mới phải >= chỉ số nước cũ',
-  path: ['waterNew'],
 });
 
 type FormValues = z.input<typeof schema>;
@@ -184,9 +172,6 @@ const getDeleteBlockedMessage = (invoice: Invoice): string | null => {
   return null;
 };
 
-const DEFAULT_ELECTRIC_UNIT_PRICE = 3500;
-const DEFAULT_WATER_UNIT_PRICE = 15000;
-
 const toMonthKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 
 const shiftMonthKey = (monthKey: string, offset: number) => {
@@ -227,6 +212,7 @@ export default function InvoicePage() {
   const [createRoomId, setCreateRoomId] = useState<number | ''>('');
   const [duplicateConfirmOpen, setDuplicateConfirmOpen] = useState(false);
   const [pendingCreateForm, setPendingCreateForm] = useState<FormData | null>(null);
+  const [pendingRoomsOpen, setPendingRoomsOpen] = useState(false);
   const [pdfLoading, setPdfLoading] = useState<number | null>(null);
   const [tenantSearch, setTenantSearch] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
@@ -263,22 +249,17 @@ export default function InvoicePage() {
     resolver: zodResolver(schema),
     defaultValues: {
       billingMonth: defaultBillingMonth,
-      electricOld: 0,
       electricNew: 0,
-      waterOld: 0,
       waterNew: 0,
-      electricUnitPrice: DEFAULT_ELECTRIC_UNIT_PRICE,
-      waterUnitPrice: DEFAULT_WATER_UNIT_PRICE,
       servicePeople: 0,
     },
   });
 
-  const watchedContractId = Number(watch('contractId') ?? 0);
+  const watchedContractId   = Number(watch('contractId') ?? 0);
   const watchedBillingMonth = watch('billingMonth');
-  const watchedElectricOld = Number(watch('electricOld') ?? 0);
-  const watchedElectricNew = Number(watch('electricNew') ?? 0);
-  const watchedWaterOld = Number(watch('waterOld') ?? 0);
-  const watchedWaterNew = Number(watch('waterNew') ?? 0);
+  const watchedElectricNew  = Number(watch('electricNew') ?? 0);
+  const watchedWaterNew     = Number(watch('waterNew') ?? 0);
+  const watchedServicePeople = Number(watch('servicePeople') ?? 0);
 
   const monthOptions = useMemo(
     () =>
@@ -373,33 +354,17 @@ export default function InvoicePage() {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [roomInvoicesForCreate, selectedMonthKey]);
 
-  const propertyLatestInvoice = useMemo(() => {
-    if (!selectedProperty?.name) return null;
-    return invoices
-      .filter(invoice => invoice.propertyName === selectedProperty.name)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
-  }, [invoices, selectedProperty?.name]);
-
-  const defaultElectricUnitPrice = propertyLatestInvoice?.electricUnitPrice && propertyLatestInvoice.electricUnitPrice > 0
-    ? propertyLatestInvoice.electricUnitPrice
-    : DEFAULT_ELECTRIC_UNIT_PRICE;
-  const defaultWaterUnitPrice = propertyLatestInvoice?.waterUnitPrice && propertyLatestInvoice.waterUnitPrice > 0
-    ? propertyLatestInvoice.waterUnitPrice
-    : DEFAULT_WATER_UNIT_PRICE;
-
   const duplicateInvoiceMessage = selectedMonthKey && selectedRoomNumber && sameMonthInvoices.length > 0
     ? `Phòng ${selectedRoomNumber} đã có hóa đơn tháng ${formatBillingMonthLabel(selectedMonthKey).replace('Tháng ', '')}. Bạn có chắc muốn tạo thêm không?`
     : null;
 
-  const missingPreviousDataWarning = Boolean(
-    selectedContract
-    && !previousMonthInvoice
-    && watchedElectricOld === 0
-    && watchedWaterOld === 0,
-  );
+  const electricOldDisplay = previousMonthInvoice?.electricNew ?? 0;
+  const waterOldDisplay    = previousMonthInvoice?.waterNew ?? 0;
 
-  const currentElectricUsed = Math.max(0, watchedElectricNew - watchedElectricOld);
-  const currentWaterUsed = Math.max(0, watchedWaterNew - watchedWaterOld);
+  const missingPreviousDataWarning = Boolean(selectedContract && !previousMonthInvoice);
+
+  const currentElectricUsed = Math.max(0, watchedElectricNew - electricOldDisplay);
+  const currentWaterUsed    = Math.max(0, watchedWaterNew - waterOldDisplay);
   const electricUsageWarning = Boolean(
     previousMonthInvoice
     && previousMonthInvoice.electricUsed > 0
@@ -410,6 +375,28 @@ export default function InvoicePage() {
     && previousMonthInvoice.waterUsed > 0
     && currentWaterUsed > previousMonthInvoice.waterUsed * 1.5,
   );
+
+  const electricFeePreview = currentElectricUsed * (selectedProperty?.electricUnitPrice ?? 0);
+  const waterFeePreview    = currentWaterUsed    * (selectedProperty?.waterUnitPrice ?? 0);
+  const serviceFeePreview  = watchedServicePeople * (selectedProperty?.serviceUnitPrice ?? 0);
+  const networkFeePreview  = selectedProperty?.networkFee ?? 0;
+  const totalPreview = (selectedContract?.monthlyRent ?? 0)
+    + electricFeePreview + waterFeePreview + serviceFeePreview + networkFeePreview;
+
+  const pendingContracts = useMemo(() => {
+    const invoicedContractIds = new Set(
+      invoices
+        .filter(inv => getMonthKey(inv.billingMonth) === defaultBillingMonth)
+        .map(inv => inv.contractId),
+    );
+    return [...activeContracts]
+      .filter(c => !invoicedContractIds.has(c.id))
+      .sort((a, b) => {
+        const propCmp = a.propertyName.localeCompare(b.propertyName, 'vi');
+        if (propCmp !== 0) return propCmp;
+        return a.roomNumber.localeCompare(b.roomNumber, 'vi', { numeric: true });
+      });
+  }, [activeContracts, defaultBillingMonth, invoices]);
 
   const filteredInvoices = useMemo(() => {
     return [...invoices]
@@ -472,21 +459,10 @@ export default function InvoicePage() {
   }, [contractsForCreateRoom, createRoomId, setValue, watchedContractId]);
 
   useEffect(() => {
-    // Use selectedContract?.id (already in deps) to avoid effect running
-    // due to selectedContract object identity changes.
     if (!selectedContract?.id) return;
-
-    setValue('electricOld', previousMonthInvoice?.electricNew ?? 0, { shouldValidate: true });
-    setValue('waterOld', previousMonthInvoice?.waterNew ?? 0, { shouldValidate: true });
     setValue('servicePeople', previousMonthInvoice?.servicePeople ?? 0, { shouldValidate: true });
-    setValue('electricUnitPrice', defaultElectricUnitPrice, { shouldValidate: true });
-    setValue('waterUnitPrice', defaultWaterUnitPrice, { shouldValidate: true });
   }, [
-    defaultElectricUnitPrice,
-    defaultWaterUnitPrice,
-    previousMonthInvoice?.electricNew,
     previousMonthInvoice?.servicePeople,
-    previousMonthInvoice?.waterNew,
     selectedContract?.id,
     selectedMonthKey,
     setValue,
@@ -496,15 +472,9 @@ export default function InvoicePage() {
     reset({
       contractId: 0,
       billingMonth: defaultBillingMonth,
-      electricOld: 0,
       electricNew: 0,
-      waterOld: 0,
       waterNew: 0,
-      electricUnitPrice: DEFAULT_ELECTRIC_UNIT_PRICE,
-      waterUnitPrice: DEFAULT_WATER_UNIT_PRICE,
       servicePeople: 0,
-      serviceUnitPrice: 0,
-      networkUnitPrice: 0,
     });
     setCreatePropertyId('');
     setCreateRoomId('');
@@ -515,8 +485,11 @@ export default function InvoicePage() {
   const createMutation = useMutation({
     mutationFn: (form: FormData) => {
       const payload: InvoiceRequest = {
-        ...form,
+        contractId:   form.contractId,
         billingMonth: `${form.billingMonth}-01`,
+        electricNew:  form.electricNew,
+        waterNew:     form.waterNew,
+        servicePeople: form.servicePeople,
       };
       return invoiceApi.create(payload);
     },
@@ -530,6 +503,22 @@ export default function InvoicePage() {
 
   const openCreateModal = () => {
     resetCreateInvoiceForm();
+    setModalOpen(true);
+  };
+
+  const openCreateFromPending = (contract: Contract) => {
+    reset({
+      contractId: 0,
+      billingMonth: defaultBillingMonth,
+      electricNew: 0,
+      waterNew: 0,
+      servicePeople: 0,
+    });
+    setDuplicateConfirmOpen(false);
+    setPendingCreateForm(null);
+    setCreatePropertyId(contract.propertyId);
+    setCreateRoomId(contract.roomId);
+    setPendingRoomsOpen(false);
     setModalOpen(true);
   };
 
@@ -560,18 +549,13 @@ export default function InvoicePage() {
       return;
     }
 
-    if (form.electricNew < form.electricOld) {
-      toast.error(`Chỉ số điện cuối kỳ (${form.electricNew}) không được nhỏ hơn đầu kỳ (${form.electricOld})`);
+    if (form.electricNew < electricOldDisplay) {
+      toast.error(`Chỉ số điện (${form.electricNew}) nhỏ hơn tháng trước (${electricOldDisplay})`);
       return;
     }
 
-    if (form.waterNew < form.waterOld) {
-      toast.error(`Chỉ số nước cuối kỳ (${form.waterNew}) không được nhỏ hơn đầu kỳ (${form.waterOld})`);
-      return;
-    }
-
-    if ((form.electricUnitPrice ?? 0) <= 0 || (form.waterUnitPrice ?? 0) <= 0) {
-      toast.error('Đơn giá điện và nước phải lớn hơn 0');
+    if (form.waterNew < waterOldDisplay) {
+      toast.error(`Chỉ số nước (${form.waterNew}) nhỏ hơn tháng trước (${waterOldDisplay})`);
       return;
     }
 
@@ -678,7 +662,7 @@ export default function InvoicePage() {
         subtitle={`${filteredInvoices.length}/${invoices.length} hóa đơn`}
         action={(
           <button
-            onClick={openCreateModal}
+            onClick={() => setPendingRoomsOpen(true)}
             className="flex items-center gap-2 rounded-xl bg-primary-800 px-4 py-2 text-sm text-white transition hover:bg-primary-900"
           >
             <Plus className="h-4 w-4" />
@@ -884,6 +868,72 @@ export default function InvoicePage() {
         </div>
       )}
 
+      {/* Modal danh sách phòng chưa có hóa đơn tháng hiện tại */}
+      <Modal
+        open={pendingRoomsOpen}
+        title={`Phòng chưa có hóa đơn — ${formatBillingMonthLabel(defaultBillingMonth)}`}
+        onClose={() => setPendingRoomsOpen(false)}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {pendingContracts.length === 0 ? (
+            <div className="py-12 text-center">
+              <div className="mb-2 text-4xl">✓</div>
+              <p className="font-medium text-gray-700">Tất cả phòng đã có hóa đơn tháng này</p>
+              <p className="mt-1 text-sm text-gray-400">Không còn phòng nào cần lập hóa đơn.</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800">
+                  {pendingContracts.length} phòng chưa lập hóa đơn
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setPendingRoomsOpen(false); openCreateModal(); }}
+                  className="text-xs text-gray-400 underline hover:text-gray-600 transition"
+                >
+                  Tạo thủ công (tháng khác)
+                </button>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-gray-100">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50">
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">Phòng</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">Khu trọ</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">Khách thuê</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">Tiền thuê</th>
+                      <th className="px-4 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {pendingContracts.map(contract => (
+                      <tr key={contract.id} className="transition hover:bg-amber-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">{contract.roomNumber}</td>
+                        <td className="px-4 py-3 text-gray-600">{contract.propertyName}</td>
+                        <td className="px-4 py-3 text-gray-700">{contract.tenantName}</td>
+                        <td className="px-4 py-3 text-gray-700">{formatVnd(contract.monthlyRent)}</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => openCreateFromPending(contract)}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-800 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary-900"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Tạo hóa đơn
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+
             <Modal open={modalOpen} title="Tạo hóa đơn mới" onClose={() => setModalOpen(false)} size="lg">
         <form onSubmit={handleSubmit(handleCreateSubmit)} className="space-y-4">
           <input type="hidden" {...register('contractId')} />
@@ -994,119 +1044,112 @@ export default function InvoicePage() {
             </div>
           )}
 
+          {selectedProperty && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-1">
+              <p className="font-medium mb-1.5">Đơn giá niêm yết — {selectedProperty.name}</p>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
+                <span>Điện: <b>{formatVnd(selectedProperty.electricUnitPrice)}/kWh</b></span>
+                <span>Nước: <b>{formatVnd(selectedProperty.waterUnitPrice)}/m³</b></span>
+                <span>Dịch vụ: <b>{formatVnd(selectedProperty.serviceUnitPrice)}/người</b></span>
+                <span>Mạng: <b>{formatVnd(selectedProperty.networkFee)}/tháng</b></span>
+              </div>
+            </div>
+          )}
+
           <div className="bg-yellow-50 rounded-xl p-4">
-            <div className="text-sm font-medium text-yellow-800 mb-3">Chỉ số điện</div>
+            <div className="text-sm font-medium text-yellow-800 mb-3">Điện</div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs text-gray-600 mb-1">Chỉ số đầu kỳ (kWh)</label>
-                <input
-                  {...register('electricOld')}
-                  type="number"
-                  min={0}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-                {errors.electricOld && <p className="text-red-500 text-xs mt-1">{errors.electricOld.message}</p>}
+                <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-500">
+                  {electricOldDisplay}
+                  <span className="ml-1 text-xs text-gray-400">
+                    {previousMonthInvoice ? '(tháng trước)' : '(mặc định)'}
+                  </span>
+                </div>
               </div>
               <div>
                 <label className="block text-xs text-gray-600 mb-1">Chỉ số cuối kỳ (kWh)</label>
                 <input
                   {...register('electricNew')}
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
                 {errors.electricNew && <p className="text-red-500 text-xs mt-1">{errors.electricNew.message}</p>}
               </div>
             </div>
-            <div className="mt-2">
-              <label className="block text-xs text-gray-600 mb-1">Đơn giá (đ/kWh)</label>
-              <input
-                {...register('electricUnitPrice')}
-                type="number"
-                min={1}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
+            {currentElectricUsed > 0 && (
+              <p className="mt-1.5 text-xs text-yellow-700">
+                Sử dụng: {currentElectricUsed} kWh × {formatVnd(selectedProperty?.electricUnitPrice ?? 0)} = <b>{formatVnd(electricFeePreview)}</b>
+              </p>
+            )}
           </div>
 
           <div className="bg-blue-50 rounded-xl p-4">
-            <div className="text-sm font-medium text-blue-800 mb-3">Chỉ số nước</div>
+            <div className="text-sm font-medium text-blue-800 mb-3">Nước</div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs text-gray-600 mb-1">Chỉ số đầu kỳ (m3)</label>
-                <input
-                  {...register('waterOld')}
-                  type="number"
-                  min={0}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-                {errors.waterOld && <p className="text-red-500 text-xs mt-1">{errors.waterOld.message}</p>}
+                <label className="block text-xs text-gray-600 mb-1">Chỉ số đầu kỳ (m³)</label>
+                <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-500">
+                  {waterOldDisplay}
+                  <span className="ml-1 text-xs text-gray-400">
+                    {previousMonthInvoice ? '(tháng trước)' : '(mặc định)'}
+                  </span>
+                </div>
               </div>
               <div>
-                <label className="block text-xs text-gray-600 mb-1">Chỉ số cuối kỳ (m3)</label>
+                <label className="block text-xs text-gray-600 mb-1">Chỉ số cuối kỳ (m³)</label>
                 <input
                   {...register('waterNew')}
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
                 {errors.waterNew && <p className="text-red-500 text-xs mt-1">{errors.waterNew.message}</p>}
               </div>
             </div>
-            <div className="mt-2">
-              <label className="block text-xs text-gray-600 mb-1">Đơn giá (đ/m3)</label>
-              <input
-                {...register('waterUnitPrice')}
-                type="number"
-                min={1}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
+            {currentWaterUsed > 0 && (
+              <p className="mt-1.5 text-xs text-blue-700">
+                Sử dụng: {currentWaterUsed} m³ × {formatVnd(selectedProperty?.waterUnitPrice ?? 0)} = <b>{formatVnd(waterFeePreview)}</b>
+              </p>
+            )}
           </div>
 
           <div className="bg-emerald-50 rounded-xl p-4">
-            <div className="text-sm font-medium text-emerald-800 mb-3">
-              Giá dịch vụ (thang máy, máy giặt, dọn rác)
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">Số người</label>
-                <input
-                  {...register('servicePeople')}
-                  type="number"
-                  min={0}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-                {errors.servicePeople && <p className="text-red-500 text-xs mt-1">{errors.servicePeople.message}</p>}
-              </div>
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">Đơn giá (đ/người)</label>
-                <input
-                  {...register('serviceUnitPrice')}
-                  type="number"
-                  min={0}
-                  placeholder="0"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-                {errors.serviceUnitPrice && <p className="text-red-500 text-xs mt-1">{errors.serviceUnitPrice.message}</p>}
-              </div>
+            <div className="text-sm font-medium text-emerald-800 mb-3">Dịch vụ chung (thang máy, máy giặt, vệ sinh)</div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Số người</label>
+              <input
+                {...register('servicePeople')}
+                type="number" min={0}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+              {errors.servicePeople && <p className="text-red-500 text-xs mt-1">{errors.servicePeople.message}</p>}
+              {watchedServicePeople > 0 && selectedProperty && (
+                <p className="mt-1.5 text-xs text-emerald-700">
+                  {watchedServicePeople} người × {formatVnd(selectedProperty.serviceUnitPrice)} = <b>{formatVnd(serviceFeePreview)}</b>
+                </p>
+              )}
             </div>
           </div>
 
-          <div className="bg-cyan-50 rounded-xl p-4">
-            <div className="text-sm font-medium text-cyan-800 mb-3">Mạng</div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">Đơn giá mạng (đ/tháng)</label>
-              <input
-                {...register('networkUnitPrice')}
-                type="number"
-                min={0}
-                placeholder="0"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-              {errors.networkUnitPrice && <p className="text-red-500 text-xs mt-1">{errors.networkUnitPrice.message}</p>}
+          {selectedProperty && selectedProperty.networkFee > 0 && (
+            <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">
+              Phí mạng internet: <b>{formatVnd(selectedProperty.networkFee)}/tháng</b>
             </div>
-          </div>
+          )}
+
+          {selectedContract && (
+            <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 text-sm">
+              <div className="flex justify-between items-center text-gray-600">
+                <span>Tiền phòng:</span>
+                <span className="font-medium">{formatVnd(selectedContract.monthlyRent)}</span>
+              </div>
+              <div className="flex justify-between items-center mt-1 text-base font-semibold text-gray-900 border-t border-gray-200 pt-2 mt-2">
+                <span>Dự tính tổng cộng:</span>
+                <span className="text-primary-800">{formatVnd(totalPreview)}</span>
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-3 justify-end pt-2">
             <button

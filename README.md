@@ -448,107 +448,227 @@ Sau khi lấy dữ liệu, `DashboardPage` tự tính trên client:
 
 ### Luồng chat
 
-1. Admin nhập câu hỏi hoặc bấm câu hỏi gợi ý.
+1. Admin nhập câu hỏi hoặc bấm gợi ý trong sidebar.
 2. FE gọi `aiApi.chat(message)` -> `POST /api/v1/ai/chat`.
-3. Backend:
-   - `AiController#chat`
-   - `AiServiceImpl#chat`
-4. `AiServiceImpl` lấy `ChatClient.Builder` từ Spring AI.
-5. `AiContextServiceImpl#buildContext()` dựng context dữ liệu hiện tại từ database.
-6. Backend ghép:
-   - system prompt
-   - context dữ liệu
-   - câu hỏi của chủ trọ
-7. Spring AI gửi prompt sang model.
+3. Backend vào `AiController#chat` -> `AiServiceImpl#chat`.
+4. `AiServiceImpl` kiểm tra `tryHandleDirectAction`:
+   - Nếu câu chứa keyword hành động trực tiếp (đánh dấu đã thu / chấm dứt hợp đồng): gọi service tương ứng, **không qua LLM**, trả kết quả ngay.
+   - Nếu không: tiếp tục xuống LLM.
+5. Kiểm tra `ChatClient.Builder` có sẵn không (fallback nếu chưa cấu hình AI profile).
+6. `AiContextServiceImpl#buildContext()` load toàn bộ dữ liệu từ DB, xây dựng context văn bản.
+7. Backend ghép `system prompt + context + câu hỏi` rồi gửi qua Spring AI sang model.
 8. Backend trả `AiChatResponse { question, answer }`.
-9. FE thay bubble `...` bằng câu trả lời thật.
+9. FE thay bubble loading `...` bằng câu trả lời thật.
+
+### Hành động trực tiếp qua chat
+
+`AiServiceImpl#tryHandleDirectAction` nhận diện keyword và thực thi ngay, **không tốn token LLM**:
+
+| Keyword nhận diện | Hành động | Service gọi |
+|---|---|---|
+| "đánh dấu đã thu" / "đánh dấu đã thanh toán" / "xác nhận thanh toán" | Đánh dấu PAID các hóa đơn có `#ID` trong câu | `InvoiceService#markAsPaid` |
+| "chấm dứt hợp đồng" / "kết thúc hợp đồng" | Chấm dứt hợp đồng `#ID` đầu tiên tìm thấy | `ContractService#terminate` |
+
+**Quy ước `#ID`**: người dùng nhập `#số` trong câu chat để chỉ định đối tượng. Ví dụ:
+- `Đánh dấu đã thanh toán hóa đơn #5 #8 #12`
+- `Chấm dứt hợp đồng #3`
+
+Nếu thiếu ID, AI trả hướng dẫn kèm ví dụ định dạng đúng thay vì báo lỗi kỹ thuật.
 
 ### Context AI lấy từ đâu
 
-`AiContextServiceImpl` hiện build context từ:
+`AiContextServiceImpl#buildContext()` dùng 5 repository với JOIN FETCH query (tránh N+1), xây dựng 11 section:
 
-- Hóa đơn chưa thanh toán
-- Phòng còn trống
-- Hợp đồng sắp hết hạn trong 30 ngày
-- Thống kê tổng quan:
-  - tổng số phòng
-  - số phòng đang thuê
-  - số phòng trống
-  - số hợp đồng active
-  - số hóa đơn chưa thu
-  - tổng tiền chưa thu
+| Section | Nội dung |
+|---|---|
+| Khu trọ | Tên, địa chỉ, số phòng theo từng trạng thái (trống/thuê/bảo trì) |
+| Tất cả phòng | Trạng thái, giá, diện tích, khách đang ở + số HĐ |
+| Khách thuê | Họ tên, SĐT, email, CCCD, hợp đồng đang thuê hiện tại |
+| HĐ đang hiệu lực | Đầy đủ thông tin, cảnh báo `[SAP HET HAN]` ≤30 ngày, `[GAN HET HAN]` ≤60 ngày |
+| HĐ đã kết thúc | 10 hợp đồng gần nhất (TERMINATED / EXPIRED) |
+| Hóa đơn UNPAID | Chi tiết từng hóa đơn chưa thu + hạn thanh toán |
+| Hóa đơn OVERDUE | Chi tiết + số ngày quá hạn + SĐT khách |
+| Doanh thu 12 tháng | Theo tháng + % ±so tháng trước + tóm tắt theo quý |
+| Phân tích phòng trống | Ngày trống, lý do (HĐ cũ / chưa từng có HĐ), cảnh báo >30/60/90 ngày, doanh thu bị mất |
+| Hành vi thanh toán | Khách đang OVERDUE + lịch sử trễ PAID (số lần, TB ngày, max ngày) |
+| Hóa đơn chưa tạo | HĐ đang ACTIVE chưa có hóa đơn tháng hiện tại |
+| Hiệu suất khu trọ | Tỷ lệ lấp đầy, doanh thu tháng + % vs tháng trước, nợ QH, tiềm năng |
+| Thống kê tổng quan | Tỷ lệ lấp đầy, tổng nợ UNPAID + OVERDUE, đã thu tháng này, doanh thu lý thuyết |
+
+**Query được tối ưu (JOIN FETCH, không N+1):**
+
+- `RoomRepository#findAllWithProperty` — load room kèm property
+- `ContractRepository#findAllNonDeletedWithDetails` — load contract kèm room + property + tenant
+- `InvoiceRepository#findAllByStatusWithDetails` — load invoice theo status kèm contract chain
+- `InvoiceRepository#findAllNonDeletedSinceWithDetails` — 13 tháng gần nhất cho phân tích trend
+
+### System Prompt
+
+AI được hướng dẫn:
+- Trả lời dựa trên dữ liệu thực, không bịa đặt
+- Phân tích và so sánh doanh thu theo tháng/quý/năm, tính % tăng giảm
+- Đưa lời khuyên cụ thể theo từng tình huống (phòng trống lâu → gợi ý giảm giá/marketing; khách trễ hạn → nhắc sớm/tăng đặt cọc; HĐ hết hạn → liên hệ xác nhận gia hạn)
+- **Chủ động cảnh báo** khi câu hỏi liên quan: phòng trống >30 ngày, khách ≥2 lần trễ 12 tháng, HĐ ≤30 ngày, hóa đơn chưa tạo tháng hiện tại
+
+### FE — Sidebar gợi ý (Tab 2×2)
+
+Sidebar được thiết kế dạng lưới 2×2 tab category, mỗi tab hiện 2–3 gợi ý ngắn:
+
+| Tab | Icon | Gợi ý |
+|---|---|---|
+| Doanh thu | TrendingUp | So sánh tháng, doanh thu theo quý, tổng quan tài chính |
+| Phân tích | BarChart2 | Phòng trống lâu, khách trễ hạn, hiệu suất khu trọ |
+| Cảnh báo | Bell | HĐ sắp hết hạn, hóa đơn chưa tạo, tổng tiền nợ |
+| Hành động | Wrench | Đánh dấu đã thu, chấm dứt hợp đồng |
+
+Bấm tab → đổi nhóm gợi ý; bấm gợi ý → gửi câu hỏi đầy đủ vào chat.
 
 ### Cấu hình AI
 
-- `application-groq.properties` đang dùng profile Groq qua API kiểu OpenAI-compatible
-- Model hiện cấu hình: `openai/gpt-oss-20b`
-- Nếu backend chạy mà không có `ChatClient.Builder`, `AiServiceImpl` sẽ trả fallback message báo AI chưa sẵn sàng
+- `application-groq.properties`: profile `ai-groq` hoặc `ai-groq-mysql` — dùng Groq API kiểu OpenAI-compatible
+- Model hiện cấu hình: `llama-3.3-70b-versatile` (~30 000 TPM, đủ dùng production)
+- Retry tự động khi Groq trả 429: tối đa 3 lần, backoff 3s → 10s (cấu hình `spring.ai.retry.*`)
+- Nếu không có `ChatClient.Builder` (chạy thiếu AI profile), `AiServiceImpl` trả fallback message hướng dẫn chạy đúng profile
 
-## File/thư mục cần lưu ý
+---
 
-### 1. File log/crash có dấu hiệu debug hoặc rác runtime
+## 8. Phân tích kỹ thuật tổng thể
 
-Các file sau đang nằm ở root và chưa được xóa:
+### Kiến trúc tổng quan
 
-- `hs_err_pid13956.log`
-- `hs_err_pid20148.log`
-- `replay_pid20148.log`
+| | Frontend | Backend |
+|---|---|---|
+| Stack | React 18 + Vite + TypeScript | Spring Boot 3 + Java 17 |
+| State | TanStack Query (`staleTime: 30s`) + Zustand | JPA/Hibernate + Spring Security |
+| Auth | JWT lưu `localStorage`, interceptor tự inject | Stateless JWT filter, BCrypt password |
+| API | `axiosClient` base `http://localhost:8080/api/v1` | REST, `GlobalExceptionHandler` wrap lỗi |
 
-Ý nghĩa:
+### Các điểm kỹ thuật đáng chú ý
 
-- Đây là file crash/runtime log của JVM, thường không nên commit lâu dài trong repo.
-- `git status` hiện cũng đang báo chúng là file untracked.
+#### Backend
 
-### 2. File/thư mục sinh ra khi cài/build
+- **Soft delete** trên `Contract` và `Invoice`: mọi truy vấn business đều filter `deleted = false`.
+- **Cron job** `0 10 0 * * * (Asia/Ho_Chi_Minh)`: tự động chuyển UNPAID quá `dueDate` → OVERDUE mỗi ngày lúc 00:10.
+- **Entity chain**: `Invoice → Contract → Room → Property` và `Contract → Tenant` — mọi response trả về đã flatten (không expose quan hệ lồng nhau ra API).
+- `BaseEntity` dùng Spring Data Auditing (`@CreatedDate`, `@LastModifiedDate`).
+- `Payment` entity và `PaymentRepository` tồn tại nhưng chưa có `PaymentService` / controller đầy đủ — chỉ được dùng ở `ContractServiceImpl` để check lịch sử trước khi xóa HĐ.
 
-- `smartrent-fe/node_modules/`
-- `smartrent-fe/dist/`
-- `smartrent/smartrent/target/`
+#### Frontend
 
-Ý nghĩa:
+- **Logic nghiệp vụ quan trọng đang nằm ở FE** (không có endpoint riêng):
+  - Dashboard: tính toàn bộ thống kê từ 3 API (property / invoice / contract).
+  - Search khách thuê: filter thuần client-side theo `fullName` + `phone`.
+  - Gợi ý chỉ số điện/nước: FE tự duyệt tập invoice đã tải để lấy tháng trước.
+- `PrivateRoute` chặn toàn bộ route theo `isAuthenticated` (Zustand) — không phân quyền theo role.
+- Interceptor `axiosClient`: `401` → xóa `localStorage` + redirect `/login`; các lỗi khác → toast.
 
-- Đây là output cài dependency/build, không phải source nghiệp vụ.
-- FE `.gitignore` đã ignore `node_modules` và `dist`.
-- Backend `.gitignore` đã ignore `target`.
+### Ghi nhận vấn đề & hạn chế hiện tại
 
-### 3. File dữ liệu cục bộ có vẻ bị nhân đôi
+| Vị trí | Vấn đề | Mức độ |
+|---|---|---|
+| `PropertyPage.tsx` | `ownerId: 1` hardcode, chưa lấy từ user đang đăng nhập | Trung bình |
+| `DashboardPage.tsx` | `paidThisMonth` lọc theo `PAID` chứ không lọc theo tháng hiện tại | Nhỏ |
+| `SecurityConfig.java` | Không có phân quyền theo role (ADMIN/USER), chỉ check `authenticated` | Trung bình |
+| `RoomServiceImpl` | Không check trùng `roomNumber` khi **update** phòng (chỉ check khi create) | Nhỏ |
+| CORS | Không cấu hình tường minh — có thể lỗi khi deploy khác domain | Trung bình |
+| `AiContextServiceImpl` | ~~Context đọc DB mỗi request~~ — **đã fix**: cache volatile 2 phút, tránh build lại khi gọi liên tiếp | Đã xử lý |
+| `ContractPage.tsx` | Gọi `roomApi.getById(roomId)` cho từng hợp đồng để lấy tên khu trọ — N+1 ở FE | Nhỏ |
+| `Payment` entity | Tồn tại nhưng chưa có luồng nghiệp vụ hoàn chỉnh | Không ảnh hưởng |
 
-- `smartrent_db.mv.db`
-- `smartrent/smartrent_db.mv.db`
+---
 
-Nhận xét:
+## 9. Lịch sử nâng cấp
 
-- Cả hai đều đang tồn tại.
-- Cả hai đều là file DB H2/MVStore cục bộ.
-- Đây có thể là 2 snapshot dữ liệu khác nhau hoặc do từng lần chạy app tạo ra.
-- Chưa kết luận file nào thừa, nhưng đây là nhóm cần bạn xác nhận trước nếu muốn dọn repo.
+### Nâng cấp AI Assistant — 2026-05-22
 
-### 4. Asset có khả năng không còn dùng
+#### Vấn đề ban đầu
 
-Tôi không thấy tham chiếu trong mã nguồn hiện tại tới các file sau:
+`AiContextServiceImpl` chỉ cung cấp 4 mảnh context nhỏ: hóa đơn UNPAID, phòng AVAILABLE, HĐ sắp hết hạn 30 ngày, thống kê đơn giản. AI không biết gì về khách thuê, toàn bộ phòng, hóa đơn OVERDUE, lịch sử doanh thu, hay hành vi thanh toán.
 
-- `smartrent-fe/src/assets/react.svg`
-- `smartrent-fe/src/assets/vite.svg`
-- `smartrent-fe/src/assets/hero.png`
-- `smartrent-fe/public/icons.svg`
+#### Thay đổi Backend
 
-Ghi chú:
+**`RoomRepository.java`** — thêm:
+```java
+@Query("SELECT r FROM Room r JOIN FETCH r.property")
+List<Room> findAllWithProperty();
+```
 
-- `smartrent-fe/public/favicon.svg` vẫn đang được dùng trong `index.html`.
-- Nhóm asset trên có thể là tàn dư từ template/demo cũ, nhưng cần xác nhận trước khi xóa.
+**`ContractRepository.java`** — thêm:
+```java
+@Query("""
+    SELECT c FROM Contract c
+    JOIN FETCH c.room r JOIN FETCH r.property p JOIN FETCH c.tenant t
+    WHERE c.deleted = false
+""")
+List<Contract> findAllNonDeletedWithDetails();
+```
 
-### 5. File rỗng
+**`InvoiceRepository.java`** — thêm:
+```java
+@Query("""
+    SELECT i FROM Invoice i
+    JOIN FETCH i.contract c JOIN FETCH c.room r JOIN FETCH r.property p JOIN FETCH c.tenant t
+    WHERE i.deleted = false AND i.billingMonth >= :fromMonth
+""")
+List<Invoice> findAllNonDeletedSinceWithDetails(@Param("fromMonth") LocalDate fromMonth);
+```
 
-- Không thấy file rỗng nào trong source project ngoài một số file 0 byte nằm trong `node_modules`.
+**`AiContextServiceImpl.java`** — rewrite hoàn toàn:
+- Thêm inject `TenantRepository`, `PropertyRepository`
+- Tăng từ 4 section → 13 section (xem bảng ở mục 7)
+- Dùng `ChronoUnit.DAYS.between()` thay `Period.getDays()` (fix bug tính ngày)
+- Thêm 5 analytics section mới: doanh thu 12 tháng, phân tích phòng trống, hành vi thanh toán, hóa đơn chưa tạo, hiệu suất khu trọ
 
-### 6. Dấu hiệu code debug
+**`AiServiceImpl.java`** — nâng cấp system prompt:
+- Chuyển sang tiếng Việt đầy đủ dấu
+- Thêm hướng dẫn phân tích xu hướng, so sánh tháng/quý/năm
+- Thêm hướng dẫn đưa lời khuyên cụ thể theo từng tình huống
+- Thêm quy tắc chủ động cảnh báo khi phát hiện vấn đề
 
-- Không thấy `console.log`, `debugger`, `System.out.println`, `printStackTrace`, `TODO`, `FIXME` trong `smartrent-fe/src` và `smartrent/smartrent/src`.
+#### Thay đổi Frontend
 
-## Kết luận nhanh
+**`AiChatPage.tsx`** — redesign sidebar gợi ý:
+- Thay list 10 button dài → tab 2×2 (Doanh thu / Phân tích / Cảnh báo / Tạo nhanh)
+- Mỗi tab chứa 2–3 gợi ý ngắn, bấm gửi câu hỏi đầy đủ
+- Thêm icons: `TrendingUp`, `BarChart2`, `Bell`, `Zap` từ lucide-react
+- Cập nhật welcome message phản ánh khả năng analytics mới
 
-- Luồng admin hiện đi theo mô hình khá rõ: React page -> API wrapper -> Spring controller -> service -> repository/entity.
-- Dashboard đang tổng hợp ở FE, chưa có endpoint riêng.
-- Luồng Hợp đồng và Hóa đơn là hai nơi có nhiều rule nghiệp vụ nhất.
-- AI Assistant không tự query tự do; nó trả lời dựa trên context backend dựng từ dữ liệu hệ thống.
-- Chưa xóa file nào; danh sách file nghi vấn đã được ghi lại ở trên để bạn tự quyết định bước dọn dẹp tiếp theo.
+### Nâng cấp AI Assistant (lần 2) — 2026-05-22
+
+#### Vấn đề
+
+- Groq trả HTTP 429 (rate limit) khi dùng model `openai/gpt-oss-20b` (giới hạn 8 000 TPM). Mỗi request gửi ~4 500 token context, gần như chỉ xử lý được 1 request/phút.
+- Tab "Tạo nhanh" (tạo khách thuê / tạo phòng qua chat) bị xóa theo yêu cầu, cần thay bằng hành động thiết thực hơn.
+
+#### Thay đổi Backend
+
+**`application-groq.properties`** — đổi model và thêm retry:
+```properties
+spring.ai.openai.chat.options.model=llama-3.3-70b-versatile
+spring.ai.openai.chat.options.temperature=0.3
+
+spring.ai.retry.max-attempts=3
+spring.ai.retry.backoff.initial-interval=3000
+spring.ai.retry.backoff.max-interval=10000
+spring.ai.retry.backoff.multiplier=2
+spring.ai.retry.on-http-codes=429
+```
+
+**`AiContextServiceImpl.java`** — thêm cache volatile 2 phút:
+```java
+private static final long CACHE_TTL_MS = 120_000;
+private volatile String cachedContext = null;
+private volatile long   cachedAt      = 0;
+// buildContext() trả cache nếu chưa quá TTL, tránh đọc DB lặp lại
+```
+
+**`AiServiceImpl.java`** — xóa toàn bộ `tryHandleQuickCreate`, thêm `tryHandleDirectAction`:
+- `handleMarkAsPaid`: nhận diện "đánh dấu đã thu / đã thanh toán", extract `#ID`, gọi `InvoiceService#markAsPaid` cho từng ID, trả kết quả thành công/thất bại từng hóa đơn
+- `handleTerminateContract`: nhận diện "chấm dứt hợp đồng / kết thúc hợp đồng", extract `#ID` đầu tiên, gọi `ContractService#terminate`, trả tóm tắt kết quả
+
+#### Thay đổi Frontend
+
+**`AiChatPage.tsx`** — thay tab "Tạo nhanh" (`Zap`) bằng tab "Hành động" (`Wrench`):
+- Xóa 2 item: "Thêm khách thuê mới", "Thêm phòng mới"
+- Thêm 2 item: "Đánh dấu đã thu" (gửi message mẫu + hướng dẫn nhập `#ID`), "Chấm dứt hợp đồng"
+

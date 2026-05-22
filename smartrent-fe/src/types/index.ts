@@ -22,6 +22,10 @@ export interface Property {
   ownerId: number;
   ownerUsername: string;
   totalRooms: number;
+  electricUnitPrice: number;
+  waterUnitPrice: number;
+  serviceUnitPrice: number;
+  networkFee: number;
   createdAt: string;
 }
 

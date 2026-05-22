@@ -7,7 +7,6 @@ import com.smartrent.entity.Room;
 import com.smartrent.entity.Tenant;
 import com.smartrent.repository.ContractRepository;
 import com.smartrent.repository.InvoiceRepository;
-import com.smartrent.repository.PaymentRepository;
 import com.smartrent.repository.RoomRepository;
 import com.smartrent.repository.TenantRepository;
 import com.smartrent.service.ContractService;
@@ -36,14 +35,12 @@ public class ContractServiceImpl implements ContractService {
     private static final String ERR_NOT_FOUND = "Không tìm thấy hợp đồng id: ";
     private static final String ERR_ACTIVE = "Không thể xóa: Hợp đồng đang có hiệu lực";
     private static final String ERR_CURRENT_PERIOD = "Không thể xóa: Hợp đồng đang trong kỳ thanh toán hiện tại";
-    private static final String ERR_PAYMENT_HISTORY = "Không thể xóa: Hợp đồng đã phát sinh lịch sử thanh toán";
-    private static final String ERR_STATUS_RULE = "Không thể xóa: Chỉ cho phép xóa hợp đồng đã chấm dứt hoặc chưa đến ngày bắt đầu";
+    private static final String ERR_STATUS_RULE = "Không thể xóa: Chỉ cho phép xóa hợp đồng đã chấm dứt, hết hạn hoặc chưa đến ngày bắt đầu";
 
     private final ContractRepository contractRepository;
     private final RoomRepository roomRepository;
     private final TenantRepository tenantRepository;
     private final InvoiceRepository invoiceRepository;
-    private final PaymentRepository paymentRepository;
 
     @Override
     public ContractResponse create(ContractRequest request) {
@@ -139,6 +136,23 @@ public class ContractServiceImpl implements ContractService {
     }
 
     @Override
+    public ContractResponse renew(Long id, LocalDate newEndDate) {
+        Contract contract = findById(id);
+
+        if (contract.getStatus() != Contract.Status.ACTIVE) {
+            throw new RuntimeException("Chỉ có thể gia hạn hợp đồng đang hiệu lực");
+        }
+
+        if (!newEndDate.isAfter(contract.getEndDate())) {
+            throw new RuntimeException(
+                    "Ngày kết thúc mới phải sau ngày kết thúc hiện tại (" + contract.getEndDate() + ")");
+        }
+
+        contract.setEndDate(newEndDate);
+        return toResponse(contractRepository.save(contract));
+    }
+
+    @Override
     public void delete(Long id) {
         Contract contract = findById(id);
         log.info("Received request to delete contract id={}", id);
@@ -173,6 +187,8 @@ public class ContractServiceImpl implements ContractService {
         LocalDate today = LocalDate.now();
 
         boolean isTerminated = contract.getStatus() == Contract.Status.TERMINATED;
+        boolean isExpired = contract.getStatus() == Contract.Status.EXPIRED
+                || contract.getEndDate().isBefore(today);
         boolean isNotStartedYet = contract.getStartDate().isAfter(today);
         boolean isInEffect = contract.getStatus() == Contract.Status.ACTIVE
                 && !isNotStartedYet
@@ -194,17 +210,10 @@ public class ContractServiceImpl implements ContractService {
                     + " chưa thanh toán";
         }
 
-        long paymentCount = paymentRepository.countByInvoiceContractId(contractId);
-        if (paymentCount > 0) {
-            return ERR_PAYMENT_HISTORY;
-        }
+        // Soft delete giữ nguyên toàn bộ dữ liệu trong DB nên không cần chặn
+        // khi đã có hóa đơn PAID hoặc lịch sử thanh toán — dữ liệu vẫn tra cứu được.
 
-        long invoiceCount = invoiceRepository.countByContractId(contractId);
-        if (invoiceCount > 0) {
-            return "Không thể xóa: Hợp đồng đã phát sinh " + invoiceCount + " hóa đơn thanh toán";
-        }
-
-        if (!isTerminated && !isNotStartedYet) {
+        if (!isTerminated && !isExpired && !isNotStartedYet) {
             return ERR_STATUS_RULE;
         }
 

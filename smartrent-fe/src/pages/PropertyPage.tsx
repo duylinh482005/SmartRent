@@ -13,12 +13,17 @@ import PageHeader from '../components/ui/PageHeader';
 import type { Property } from '../types';
 
 const schema = z.object({
-  name:        z.string().min(1, 'Tên khu trọ không được để trống'),
-  address:     z.string().min(1, 'Địa chỉ không được để trống'),
-  description: z.string().optional(),
+  name:              z.string().min(1, 'Tên khu trọ không được để trống'),
+  address:           z.string().min(1, 'Địa chỉ không được để trống'),
+  description:       z.string().optional(),
+  electricUnitPrice: z.coerce.number().min(0, 'Đơn giá phải >= 0'),
+  waterUnitPrice:    z.coerce.number().min(0, 'Đơn giá phải >= 0'),
+  serviceUnitPrice:  z.coerce.number().min(0, 'Đơn giá phải >= 0'),
+  networkFee:        z.coerce.number().min(0, 'Đơn giá phải >= 0'),
 });
 
-type FormData = z.infer<typeof schema>;
+type FormValues = z.input<typeof schema>;
+type FormData = z.output<typeof schema>;
 
 export default function PropertyPage() {
   const queryClient               = useQueryClient();
@@ -33,12 +38,22 @@ export default function PropertyPage() {
 
   const properties = data?.data.data ?? [];
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<FormValues, unknown, FormData>({
     resolver: zodResolver(schema),
   });
 
-  const openCreate = () => { setEditing(null); reset({}); setModalOpen(true); };
-  const openEdit   = (p: Property) => { setEditing(p); reset({ name: p.name, address: p.address, description: p.description }); setModalOpen(true); };
+  const openCreate = () => {
+    setEditing(null);
+    reset({ electricUnitPrice: 3500, waterUnitPrice: 15000, serviceUnitPrice: 0, networkFee: 0 });
+    setModalOpen(true);
+  };
+  const openEdit = (p: Property) => {
+    setEditing(p);
+    reset({ name: p.name, address: p.address, description: p.description ?? '',
+      electricUnitPrice: p.electricUnitPrice, waterUnitPrice: p.waterUnitPrice,
+      serviceUnitPrice: p.serviceUnitPrice, networkFee: p.networkFee });
+    setModalOpen(true);
+  };
 
   const saveMutation = useMutation({ // hook thay đổi dữ liệu (react query)
     mutationFn: (data: FormData) => { // nhận data từ form
@@ -136,8 +151,37 @@ export default function PropertyPage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Mô tả (tùy chọn)</label>
-            <textarea {...register('description')} rows={3} placeholder="Mô tả thêm về khu trọ..."
+            <textarea {...register('description')} rows={2} placeholder="Mô tả thêm về khu trọ..."
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none" />
+          </div>
+          <div className="bg-amber-50 rounded-xl p-4 space-y-3">
+            <p className="text-sm font-medium text-amber-800">Đơn giá niêm yết</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Điện (đ/kWh)</label>
+                <input {...register('electricUnitPrice')} type="number" min={0}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                {errors.electricUnitPrice && <p className="text-red-500 text-xs mt-1">{errors.electricUnitPrice.message}</p>}
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Nước (đ/m³)</label>
+                <input {...register('waterUnitPrice')} type="number" min={0}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                {errors.waterUnitPrice && <p className="text-red-500 text-xs mt-1">{errors.waterUnitPrice.message}</p>}
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Dịch vụ chung (đ/người/tháng)</label>
+                <input {...register('serviceUnitPrice')} type="number" min={0}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                {errors.serviceUnitPrice && <p className="text-red-500 text-xs mt-1">{errors.serviceUnitPrice.message}</p>}
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Mạng internet (đ/phòng/tháng)</label>
+                <input {...register('networkFee')} type="number" min={0}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                {errors.networkFee && <p className="text-red-500 text-xs mt-1">{errors.networkFee.message}</p>}
+              </div>
+            </div>
           </div>
           <div className="flex gap-3 justify-end pt-2">
             <button type="button" onClick={() => setModalOpen(false)}

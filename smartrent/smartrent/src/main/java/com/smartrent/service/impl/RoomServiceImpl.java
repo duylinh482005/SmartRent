@@ -84,7 +84,11 @@ public class RoomServiceImpl implements RoomService {
 
     @Override
     public void delete(Long id) {
-        roomRepository.delete(findById(id));
+        Room room = findById(id);
+        if (room.getStatus() == Room.Status.OCCUPIED) {
+            throw new RuntimeException("Không thể xóa phòng đang có người thuê. Hãy chấm dứt hợp đồng trước.");
+        }
+        roomRepository.delete(room);
     }
 
     private Room findById(Long id) {

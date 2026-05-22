@@ -15,6 +15,7 @@ public interface ContractRepository extends JpaRepository<Contract, Long> {
     List<Contract> findByRoomIdAndDeletedFalse(Long roomId);
     List<Contract> findByTenantIdAndDeletedFalse(Long tenantId);
     Optional<Contract> findByRoomIdAndStatusAndDeletedFalse(Long roomId, Contract.Status status);
+    boolean existsByTenantIdAndStatusAndDeletedFalse(Long tenantId, Contract.Status status);
 
     @Query("""
         SELECT c FROM Contract c
@@ -23,4 +24,13 @@ public interface ContractRepository extends JpaRepository<Contract, Long> {
         WHERE c.status = :status AND c.deleted = false
     """)
     List<Contract> findAllActiveWithDetails(Contract.Status status);
+
+    @Query("""
+        SELECT c FROM Contract c
+        JOIN FETCH c.room r
+        JOIN FETCH r.property p
+        JOIN FETCH c.tenant t
+        WHERE c.deleted = false
+    """)
+    List<Contract> findAllNonDeletedWithDetails();
 }
