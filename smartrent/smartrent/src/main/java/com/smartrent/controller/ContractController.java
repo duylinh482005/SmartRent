@@ -1,17 +1,15 @@
 package com.smartrent.controller;
 
 import com.smartrent.dto.request.ContractRequest;
+import com.smartrent.dto.request.ContractUpdateRequest;
 import com.smartrent.dto.response.ContractResponse;
 import com.smartrent.service.ContractService;
 import com.smartrent.util.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.time.LocalDate;
 
 import java.util.List;
 
@@ -56,11 +54,11 @@ public class ContractController {
         return ResponseEntity.ok(ApiResponse.success(contractService.terminate(id)));
     }
 
-    @PatchMapping("/{id}/renew")
-    public ResponseEntity<ApiResponse<ContractResponse>> renew(
+    @PutMapping("/{id}")
+    public ResponseEntity<ApiResponse<ContractResponse>> update(
             @PathVariable Long id,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate newEndDate) {
-        return ResponseEntity.ok(ApiResponse.success(contractService.renew(id, newEndDate)));
+            @RequestBody ContractUpdateRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(contractService.update(id, request)));
     }
 
     @DeleteMapping("/{id}")

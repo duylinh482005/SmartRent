@@ -1,6 +1,7 @@
 package com.smartrent.service.impl;
 
 import com.smartrent.dto.request.ContractRequest;
+import com.smartrent.dto.request.ContractUpdateRequest;
 import com.smartrent.dto.response.ContractResponse;
 import com.smartrent.entity.Contract;
 import com.smartrent.entity.Room;
@@ -137,19 +138,32 @@ public class ContractServiceImpl implements ContractService {
     }
 
     @Override
-    public ContractResponse renew(Long id, LocalDate newEndDate) {
+    public ContractResponse update(Long id, ContractUpdateRequest request) {
         Contract contract = findById(id);
 
-        if (contract.getStatus() != Contract.Status.ACTIVE) {
-            throw new RuntimeException("Chỉ có thể gia hạn hợp đồng đang hiệu lực");
+        if (contract.getStatus() == Contract.Status.TERMINATED) {
+            throw new RuntimeException("Không thể sửa hợp đồng đã chấm dứt");
         }
 
-        if (!newEndDate.isAfter(contract.getEndDate())) {
-            throw new RuntimeException(
-                    "Ngày kết thúc mới phải sau ngày kết thúc hiện tại (" + contract.getEndDate() + ")");
+        if (request.getEndDate() != null) {
+            if (!request.getEndDate().isAfter(contract.getStartDate())) {
+                throw new RuntimeException("Ngày kết thúc phải sau ngày bắt đầu hợp đồng (" + contract.getStartDate() + ")");
+            }
+            contract.setEndDate(request.getEndDate());
+        }
+        if (request.getMonthlyRent() != null) {
+            if (request.getMonthlyRent().compareTo(BigDecimal.ZERO) <= 0) {
+                throw new RuntimeException("Tiền thuê phải lớn hơn 0");
+            }
+            contract.setMonthlyRent(request.getMonthlyRent());
+        }
+        if (request.getNumberOfPeople() != null) {
+            if (request.getNumberOfPeople() < 1) {
+                throw new RuntimeException("Số người phải ít nhất là 1");
+            }
+            contract.setNumberOfPeople(request.getNumberOfPeople());
         }
 
-        contract.setEndDate(newEndDate);
         return toResponse(contractRepository.save(contract));
     }
 

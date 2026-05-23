@@ -6,7 +6,12 @@ export interface AiChatResponse {
   answer: string;
 }
 
+export interface ChatHistoryItem {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export const aiApi = {
-  chat: (message: string) =>
-    axiosClient.post<ApiResponse<AiChatResponse>>('/ai/chat', { message }),
+  chat: (message: string, history?: ChatHistoryItem[]) =>
+    axiosClient.post<ApiResponse<AiChatResponse>>('/ai/chat', { message, history }),
 };

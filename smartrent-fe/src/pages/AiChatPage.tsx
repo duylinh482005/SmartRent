@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Bot, Send, User, Trash2, Lightbulb, TrendingUp, BarChart2, Bell, Wrench } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { aiApi } from '../api/aiApi';
+import type { ChatHistoryItem } from '../api/aiApi';
 import PageHeader from '../components/ui/PageHeader';
 
 interface Message {
@@ -61,12 +62,69 @@ const SUGGESTION_CATEGORIES: SuggestionCategory[] = [
     items: [
       { label: 'Đánh dấu đã thu',            message: 'Đánh dấu đã thanh toán hóa đơn' },
       { label: 'Chấm dứt hợp đồng',          message: 'Chấm dứt hợp đồng' },
+      { label: 'Sửa hợp đồng',               message: 'Sửa hợp đồng' },
+      { label: 'Chuyển trạng thái phòng',    message: 'Chuyển trạng thái phòng' },
     ],
   },
 ];
 
+// ── Inline markdown renderer ──────────────────────────────────────────────────
+
+function renderInline(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.startsWith('**') && part.endsWith('**')
+          ? <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>
+          : <span key={i}>{part}</span>
+      )}
+    </>
+  );
+}
+
+function MarkdownContent({ content }: { content: string }) {
+  const lines = content.split('\n');
+  const elements: React.ReactNode[] = [];
+
+  lines.forEach((line, idx) => {
+    if (line.startsWith('## ')) {
+      elements.push(
+        <p key={idx} className="font-semibold text-gray-900 mt-3 mb-0.5 first:mt-0">
+          {renderInline(line.slice(3))}
+        </p>
+      );
+    } else if (line.startsWith('### ')) {
+      elements.push(
+        <p key={idx} className="font-medium text-gray-800 mt-2 mb-0.5 first:mt-0">
+          {renderInline(line.slice(4))}
+        </p>
+      );
+    } else if (line.startsWith('- ') || line.startsWith('• ')) {
+      const text = line.startsWith('- ') ? line.slice(2) : line.slice(2);
+      elements.push(
+        <p key={idx} className="mt-0.5 pl-1">
+          {'• '}{renderInline(text)}
+        </p>
+      );
+    } else if (!line.trim()) {
+      elements.push(<div key={idx} className="h-1.5" />);
+    } else {
+      elements.push(
+        <p key={idx} className={idx > 0 ? 'mt-1' : ''}>
+          {renderInline(line)}
+        </p>
+      );
+    }
+  });
+
+  return <>{elements}</>;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function AiChatPage() {
-  const [messages, setMessages]             = useState<Message[]>([
+  const [messages, setMessages] = useState<Message[]>([
     {
       id: 0,
       role: 'assistant',
@@ -86,6 +144,12 @@ export default function AiChatPage() {
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || loading) return;
+
+    // Snapshot conversation history before state updates (max 10 previous turns)
+    const history: ChatHistoryItem[] = messages
+      .filter(m => m.id !== 0 && m.content !== '...')
+      .slice(-10)
+      .map(m => ({ role: m.role, content: m.content }));
 
     const userMsg: Message = {
       id: Date.now(),
@@ -107,7 +171,7 @@ export default function AiChatPage() {
     }]);
 
     try {
-      const res = await aiApi.chat(text.trim());
+      const res = await aiApi.chat(text.trim(), history);
       const answer = res.data.data.answer;
       setMessages(prev => prev.map(m =>
         m.id === loadingId ? { ...m, content: answer } : m
@@ -124,7 +188,7 @@ export default function AiChatPage() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     sendMessage(input);
   };
@@ -189,6 +253,8 @@ export default function AiChatPage() {
                         <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                         <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
+                    ) : msg.role === 'assistant' ? (
+                      <MarkdownContent content={msg.content} />
                     ) : (
                       msg.content.split('\n').map((line, i) => (
                         <p key={i} className={i > 0 ? 'mt-1' : ''}>{line}</p>
@@ -277,9 +343,9 @@ export default function AiChatPage() {
           <div className="bg-blue-50 rounded-2xl border border-blue-100 p-3.5">
             <div className="text-xs font-medium text-blue-800 mb-2">Mẹo sử dụng</div>
             <ul className="text-xs text-blue-700 space-y-1.5">
-              <li>• Hỏi so sánh theo tháng/quý</li>
-              <li>• Hỏi lý do và giải pháp</li>
-              <li>• Nhờ tư vấn cụ thể</li>
+              <li>• Hỏi tiếp theo không cần lặp lại ngữ cảnh</li>
+              <li>• Dùng #ID cho hành động trực tiếp</li>
+              <li>• Nhờ tư vấn và phân tích cụ thể</li>
             </ul>
           </div>
 

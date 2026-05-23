@@ -303,7 +303,7 @@ Sau khi lấy dữ liệu, `DashboardPage` tự tính trên client:
   - tìm `Room`, bắt buộc phòng đang `AVAILABLE`
   - check chưa có hợp đồng `ACTIVE` khác cho cùng phòng
   - tìm `Tenant`
-  - tạo `Contract` trạng thái `ACTIVE`
+  - tạo `Contract` trạng thái `ACTIVE`, lưu thêm `numberOfPeople`
   - đồng thời đổi `Room.status = OCCUPIED`
   - lưu room rồi lưu contract
 
@@ -381,6 +381,7 @@ Sau khi lấy dữ liệu, `DashboardPage` tự tính trên client:
   - chỉ số điện/nước cuối < đầu
   - đơn giá điện/nước <= 0
   - trùng hóa đơn cùng tháng thì bật modal xác nhận tạo thêm
+- Payload FE gửi chỉ gồm: `contractId`, `billingMonth`, `electricNew`, `waterNew` (không có `servicePeople`)
 - Backend:
   - `InvoiceController#create`
   - `InvoiceServiceImpl#create`
@@ -388,11 +389,12 @@ Sau khi lấy dữ liệu, `DashboardPage` tự tính trên client:
   - contract phải đang `ACTIVE`
   - check trùng `contractId + billingMonth`
   - check lại chỉ số điện/nước
+  - lấy `servicePeople` tự động từ `contract.getNumberOfPeople()` (không nhận từ request)
   - tính:
     - `roomFee`
     - `electricFee`
     - `waterFee`
-    - `serviceFee`
+    - `serviceFee = serviceUnitPrice × contract.numberOfPeople`
     - `networkFee`
     - `totalAmount`
   - set `status = UNPAID`
@@ -671,4 +673,61 @@ private volatile long   cachedAt      = 0;
 **`AiChatPage.tsx`** — thay tab "Tạo nhanh" (`Zap`) bằng tab "Hành động" (`Wrench`):
 - Xóa 2 item: "Thêm khách thuê mới", "Thêm phòng mới"
 - Thêm 2 item: "Đánh dấu đã thu" (gửi message mẫu + hướng dẫn nhập `#ID`), "Chấm dứt hợp đồng"
+
+### Nâng cấp Hợp đồng & Hóa đơn — 2026-05-22
+
+#### Vấn đề
+
+Khi tạo hóa đơn, admin phải tự nhập lại số người mỗi tháng vào ô "Dịch vụ chung" — thông tin này thực chất đã biết ngay từ lúc ký hợp đồng và không thay đổi theo tháng.
+
+#### Thay đổi Backend
+
+**`Contract.java`** — thêm field:
+```java
+@Column(name = "number_of_people")
+private Integer numberOfPeople;
+```
+
+**`ContractRequest.java`** — thêm field với validation:
+```java
+@Min(value = 1, message = "Số người trong phòng phải ít nhất là 1")
+private Integer numberOfPeople;
+```
+
+**`ContractResponse.java`** — thêm field `numberOfPeople` vào response.
+
+**`ContractServiceImpl.java`**:
+- `create()`: lưu `numberOfPeople` từ request vào entity
+- `toResponse()`: trả `numberOfPeople` về FE
+
+**`InvoiceRequest.java`** — xóa field `servicePeople` (không còn nhận từ FE).
+
+**`InvoiceServiceImpl.java`** — đổi nguồn lấy số người:
+```java
+// Trước: int servicePeople = request.getServicePeople() != null ? request.getServicePeople() : 0;
+int servicePeople = contract.getNumberOfPeople() != null ? contract.getNumberOfPeople() : 0;
+```
+
+> **DB migration:** Cần thêm column `ALTER TABLE contracts ADD COLUMN number_of_people INT NULL;`
+> Hợp đồng cũ có `number_of_people = NULL` → `servicePeople = 0` khi tạo hóa đơn (an toàn).
+
+#### Thay đổi Frontend
+
+**`types/index.ts`** — thêm `numberOfPeople?: number | null` vào interface `Contract`.
+
+**`contractApi.ts`** — thêm `numberOfPeople?: number` vào interface `ContractRequest`.
+
+**`invoiceApi.ts`** — xóa `servicePeople` khỏi interface `InvoiceRequest`.
+
+**`ContractPage.tsx`**:
+- Thêm field "Số người trong phòng" vào form tạo hợp đồng (validation `min: 1`)
+- Hiển thị số người trong modal xác nhận trước khi tạo
+- Schema zod thêm `numberOfPeople: z.coerce.number().min(1)`
+
+**`InvoicePage.tsx`**:
+- Xóa input "Số người" khỏi form tạo hóa đơn
+- Thay bằng ô read-only hiển thị số người lấy từ `selectedContract.numberOfPeople`
+- Preview phí dịch vụ tự tính: `contractNumberOfPeople × serviceUnitPrice`
+- Xóa `useEffect` từng set `servicePeople` từ hóa đơn tháng trước
+- Xóa `watchedServicePeople` khỏi `watch()`
 

@@ -78,6 +78,10 @@ public class RoomServiceImpl implements RoomService {
     @Override
     public RoomResponse updateStatus(Long id, Room.Status status) {
         Room room = findById(id);
+        if (room.getStatus() == Room.Status.OCCUPIED) {
+            throw new RuntimeException(
+                    "Phòng " + room.getRoomNumber() + " đang có khách thuê, không thể đổi trạng thái. Hãy chấm dứt hợp đồng trước.");
+        }
         room.setStatus(status);
         return toResponse(roomRepository.save(room));
     }

@@ -1,17 +1,29 @@
 package com.smartrent.service.impl;
 
+import com.smartrent.dto.request.AiChatRequest;
+import com.smartrent.dto.request.ContractUpdateRequest;
 import com.smartrent.dto.response.AiChatResponse;
+import com.smartrent.dto.response.ContractResponse;
+import com.smartrent.dto.response.RoomResponse;
+import com.smartrent.entity.Room;
 import com.smartrent.service.AiContextService;
 import com.smartrent.service.AiService;
 import com.smartrent.service.ContractService;
 import com.smartrent.service.InvoiceService;
+import com.smartrent.service.RoomService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -29,10 +41,14 @@ public class AiServiceImpl implements AiService {
     private final AiContextService aiContextService;
     private final InvoiceService invoiceService;
     private final ContractService contractService;
+    private final RoomService roomService;
     private final Environment environment;
 
-    private static final Pattern ID_PATTERN = Pattern.compile("#(\\d+)");
+    private static final Pattern ID_PATTERN     = Pattern.compile("#(\\d+)");
+    private static final Pattern MONTHS_PATTERN = Pattern.compile("(\\d+)\\s*tháng");
+    private static final DateTimeFormatter DATE_FMT  = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("MM/yyyy");
+    private static final int MAX_HISTORY = 10;
 
     private static final String SYSTEM_PROMPT = """
             Bạn là trợ lý AI thông minh của hệ thống quản lý phòng trọ SmartRent.
@@ -44,8 +60,15 @@ public class AiServiceImpl implements AiService {
             - Chỉ dựa trên dữ liệu được cung cấp, không bịa đặt.
             - Nếu không có dữ liệu: trả lời "Không có dữ liệu."
             - Câu hỏi số liệu: trả lời con số cụ thể.
-            - Câu hỏi liệt kê: dùng danh sách dấu gạch đầu dòng, luôn kèm ID (#số) để dễ thao tác.
+            - Câu hỏi liệt kê: dùng danh sách `- `, luôn kèm ID (#số) để dễ thao tác.
             - Câu hỏi về đối tượng cụ thể: tìm chính xác và trả lời đầy đủ.
+            - Nhớ ngữ cảnh cuộc hội thoại trước để trả lời liên quan.
+
+            ĐỊNH DẠNG MARKDOWN (bắt buộc dùng):
+            - Dùng **in đậm** cho số tiền, tên phòng, tên khách, con số quan trọng.
+            - Dùng ## cho tiêu đề phần khi trả lời dài nhiều mục.
+            - Dùng `- ` cho danh sách.
+            - KHÔNG dùng bảng markdown (|), thay bằng danh sách.
 
             PHÂN TÍCH & TƯ VẤN:
             - So sánh doanh thu: dùng dữ liệu tháng/quý/năm để tính % tăng giảm, nhận xét xu hướng.
@@ -61,10 +84,18 @@ public class AiServiceImpl implements AiService {
             - Khách có ≥2 lần trễ hạn trong 12 tháng.
             - Hợp đồng còn ≤30 ngày mà chưa có tín hiệu gia hạn.
             - Hóa đơn chưa tạo cho tháng hiện tại.
+
+            HÀNH ĐỘNG TRỰC TIẾP (hướng dẫn người dùng dùng #ID khi cần):
+            - Đánh dấu đã thu: "Đánh dấu đã thanh toán hóa đơn #5 #8"
+            - Chấm dứt hợp đồng: "Chấm dứt hợp đồng #3"
+            - Sửa hợp đồng (gia hạn ngày kết thúc): "Sửa hợp đồng #3 thêm 6 tháng"
+            - Chuyển phòng bảo trì: "Đặt phòng #7 vào bảo trì" (chỉ khi phòng đang trống, không có khách)
+            - Mở lại phòng: "Phòng #7 sửa xong" (chỉ khi phòng không có khách)
+            - Lưu ý: KHÔNG thể đổi trạng thái phòng đang có khách thuê. Phải chấm dứt hợp đồng trước.
             """;
 
     @Override
-    public AiChatResponse chat(String message) {
+    public AiChatResponse chat(String message, List<AiChatRequest.ChatHistoryItem> history) {
         Optional<String> directResponse = tryHandleDirectAction(message);
         if (directResponse.isPresent()) {
             return AiChatResponse.builder()
@@ -93,12 +124,16 @@ public class AiServiceImpl implements AiService {
 
         log.info("AI query: {}", message);
 
+        List<Message> historyMessages = buildHistoryMessages(history);
+
+        // Explicit message ordering for reliable multi-turn conversations
+        List<Message> allMessages = new ArrayList<>();
+        allMessages.add(new SystemMessage(SYSTEM_PROMPT));
+        allMessages.addAll(historyMessages);
+        allMessages.add(new UserMessage(fullUserMessage));
+
         ChatClient chatClient = chatClientBuilder.build();
-        String answer = chatClient.prompt()
-                .system(SYSTEM_PROMPT)
-                .user(fullUserMessage)
-                .call()
-                .content();
+        String answer = chatClient.prompt(new Prompt(allMessages)).call().content();
 
         log.info("AI answer: {}", answer);
 
@@ -108,16 +143,48 @@ public class AiServiceImpl implements AiService {
                 .build();
     }
 
+    // ── History builder ───────────────────────────────────────────────────────
+
+    private List<Message> buildHistoryMessages(List<AiChatRequest.ChatHistoryItem> history) {
+        if (history == null || history.isEmpty()) return List.of();
+
+        List<AiChatRequest.ChatHistoryItem> limited = history.size() > MAX_HISTORY
+                ? history.subList(history.size() - MAX_HISTORY, history.size())
+                : history;
+
+        List<Message> messages = new ArrayList<>();
+        for (AiChatRequest.ChatHistoryItem item : limited) {
+            if ("user".equals(item.getRole())) {
+                messages.add(new UserMessage(item.getContent()));
+            } else if ("assistant".equals(item.getRole())) {
+                messages.add(new AssistantMessage(item.getContent()));
+            }
+        }
+        return messages;
+    }
+
     // ── Direct action dispatcher ──────────────────────────────────────────────
 
     private Optional<String> tryHandleDirectAction(String message) {
         String normalized = message.toLowerCase();
+
         if (normalized.contains("xác nhận thanh toán") || normalized.contains("đánh dấu thanh toán")
                 || normalized.contains("đánh dấu đã thu") || normalized.contains("đánh dấu đã thanh toán")) {
             return Optional.of(handleMarkAsPaid(message));
         }
         if (normalized.contains("chấm dứt hợp đồng") || normalized.contains("kết thúc hợp đồng")) {
             return Optional.of(handleTerminateContract(message));
+        }
+        if (normalized.contains("sửa hợp đồng") && !extractIds(message).isEmpty()) {
+            return Optional.of(handleEditContract(message));
+        }
+        if (normalized.contains("bảo trì") && normalized.contains("phòng")
+                && !extractIds(message).isEmpty()) {
+            return Optional.of(handleRoomStatus(message, Room.Status.MAINTENANCE));
+        }
+        if ((normalized.contains("sửa xong") || normalized.contains("mở lại phòng"))
+                && !extractIds(message).isEmpty()) {
+            return Optional.of(handleRoomStatus(message, Room.Status.AVAILABLE));
         }
         return Optional.empty();
     }
@@ -166,13 +233,83 @@ public class AiServiceImpl implements AiService {
 
         Long id = ids.get(0);
         try {
-            var contract = contractService.terminate(id);
+            ContractResponse contract = contractService.terminate(id);
             return String.format(
                     "Đã chấm dứt hợp đồng #%d.\nPhòng %s (%s) — Khách: %s\nPhòng đã chuyển về trạng thái trống.",
                     id, contract.getRoomNumber(), contract.getPropertyName(), contract.getTenantName());
         } catch (RuntimeException ex) {
             return "Không thể chấm dứt hợp đồng #" + id + ": " + ex.getMessage();
         }
+    }
+
+    // ── Action: edit contract (extend end date) ───────────────────────────────
+
+    private String handleEditContract(String message) {
+        List<Long> ids = extractIds(message);
+        if (ids.isEmpty()) {
+            return "Vui lòng cung cấp ID hợp đồng theo định dạng #số. Ví dụ:\nSửa hợp đồng #3 thêm 6 tháng";
+        }
+
+        Long id = ids.get(0);
+
+        Matcher monthMatcher = MONTHS_PATTERN.matcher(message.toLowerCase());
+        if (!monthMatcher.find()) {
+            return "Vui lòng chỉ định số tháng muốn gia hạn. Ví dụ:\nSửa hợp đồng #" + id + " thêm 6 tháng";
+        }
+
+        int months = Integer.parseInt(monthMatcher.group(1));
+        try {
+            ContractResponse current = contractService.getById(id);
+            LocalDate newEndDate = current.getEndDate().plusMonths(months);
+            ContractUpdateRequest updateReq = ContractUpdateRequest.builder()
+                    .endDate(newEndDate)
+                    .build();
+            ContractResponse updated = contractService.update(id, updateReq);
+            return String.format(
+                    "Đã cập nhật hợp đồng #%d thêm %d tháng.\nPhòng %s (%s) — Khách: %s\nNgày hết hạn mới: %s",
+                    id, months, updated.getRoomNumber(), updated.getPropertyName(),
+                    updated.getTenantName(), newEndDate.format(DATE_FMT));
+        } catch (RuntimeException ex) {
+            return "Không thể cập nhật hợp đồng #" + id + ": " + ex.getMessage();
+        }
+    }
+
+    // ── Action: change room status ────────────────────────────────────────────
+
+    private String handleRoomStatus(String message, Room.Status targetStatus) {
+        List<Long> ids = extractIds(message);
+        if (ids.isEmpty()) {
+            String example = targetStatus == Room.Status.MAINTENANCE
+                    ? "Đặt phòng #7 vào bảo trì" : "Phòng #7 sửa xong";
+            return "Vui lòng cung cấp ID phòng theo định dạng #số. Ví dụ:\n" + example;
+        }
+
+        List<String> success = new ArrayList<>();
+        List<String> failed  = new ArrayList<>();
+        for (Long id : ids) {
+            try {
+                RoomResponse room = roomService.updateStatus(id, targetStatus);
+                String label = targetStatus == Room.Status.MAINTENANCE ? "bảo trì" : "còn trống";
+                success.add(String.format("✓ Phòng #%d (%s - %s) → %s",
+                        id, room.getRoomNumber(), room.getPropertyName(), label));
+            } catch (RuntimeException ex) {
+                failed.add(String.format("✗ Phòng #%d — %s", id, ex.getMessage()));
+            }
+        }
+
+        String header = targetStatus == Room.Status.MAINTENANCE
+                ? "Đã chuyển sang bảo trì:\n" : "Đã mở lại (còn trống):\n";
+        StringBuilder sb = new StringBuilder();
+        if (!success.isEmpty()) {
+            sb.append(header);
+            success.forEach(s -> sb.append(s).append("\n"));
+        }
+        if (!failed.isEmpty()) {
+            if (!sb.isEmpty()) sb.append("\n");
+            sb.append("Không thể xử lý:\n");
+            failed.forEach(f -> sb.append(f).append("\n"));
+        }
+        return sb.toString().trim();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

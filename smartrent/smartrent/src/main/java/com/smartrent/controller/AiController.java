@@ -20,6 +20,6 @@ public class AiController {
     public ResponseEntity<ApiResponse<AiChatResponse>> chat(
             @Valid @RequestBody AiChatRequest request) {
         return ResponseEntity.ok(
-                ApiResponse.success(aiService.chat(request.getMessage())));
+                ApiResponse.success(aiService.chat(request.getMessage(), request.getHistory())));
     }
 }

@@ -125,8 +125,8 @@ public class AiContextServiceImpl implements AiContextService {
                             ac.getTenant().getFullName(), ac.getTenant().getPhone(), ac.getId())
                     : "";
             ctx.append(String.format(
-                    "• Phòng %s | Khu: %s | Trạng thái: %s | Giá: %,.0f đ/tháng | DT: %d m²%s\n",
-                    r.getRoomNumber(), r.getProperty().getName(),
+                    "• Phòng #%d (%s) | Khu: %s | Trạng thái: %s | Giá: %,.0f đ/tháng | DT: %d m²%s\n",
+                    r.getId(), r.getRoomNumber(), r.getProperty().getName(),
                     translateRoomStatus(r.getStatus()), r.getPrice(), r.getArea(), tenant));
         }
         ctx.append("\n");
