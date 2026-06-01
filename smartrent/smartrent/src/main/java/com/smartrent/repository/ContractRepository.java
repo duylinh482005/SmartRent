@@ -3,8 +3,10 @@ package com.smartrent.repository;
 import com.smartrent.entity.Contract;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,6 +26,15 @@ public interface ContractRepository extends JpaRepository<Contract, Long> {
         WHERE c.status = :status AND c.deleted = false
     """)
     List<Contract> findAllActiveWithDetails(Contract.Status status);
+
+    @Query("""
+        SELECT c FROM Contract c
+        JOIN FETCH c.room r
+        WHERE c.status = 'ACTIVE'
+          AND c.deleted = false
+          AND c.endDate < :today
+    """)
+    List<Contract> findActiveContractsExpiredBefore(@Param("today") LocalDate today);
 
     @Query("""
         SELECT c FROM Contract c

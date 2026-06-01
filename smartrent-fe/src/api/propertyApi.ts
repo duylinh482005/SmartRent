@@ -5,7 +5,6 @@ export interface PropertyRequest {
   name: string;
   address: string;
   description?: string;
-  ownerId: number;
   electricUnitPrice?: number;
   waterUnitPrice?: number;
   serviceUnitPrice?: number;

@@ -11,6 +11,7 @@ export interface RoomRequest {
 }
 
 export const roomApi = {
+  getAll:          ()                              => axiosClient.get<ApiResponse<Room[]>>('/rooms'),
   uploadRoomImage: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

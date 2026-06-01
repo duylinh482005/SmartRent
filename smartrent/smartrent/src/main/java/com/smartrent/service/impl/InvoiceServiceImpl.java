@@ -41,6 +41,8 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     public InvoiceResponse create(InvoiceRequest request) {
+        LocalDate billingMonth = request.getBillingMonth().withDayOfMonth(1);
+
         Contract contract = contractRepository.findByIdAndDeletedFalse(request.getContractId())
                 .orElseThrow(() -> new RuntimeException(
                         "Không tìm thấy hợp đồng id: " + request.getContractId()));
@@ -49,11 +51,22 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new RuntimeException("Hợp đồng không còn hiệu lực, không thể tạo hóa đơn");
         }
 
+        LocalDate contractStart = contract.getStartDate().withDayOfMonth(1);
+        LocalDate contractEnd = contract.getEndDate().withDayOfMonth(1);
+        if (billingMonth.isBefore(contractStart)) {
+            throw new RuntimeException("Kỳ thanh toán " + billingMonth.getMonth().getValue() + "/" + billingMonth.getYear()
+                    + " trước ngày bắt đầu hợp đồng (" + contract.getStartDate() + ")");
+        }
+        if (billingMonth.isAfter(contractEnd)) {
+            throw new RuntimeException("Kỳ thanh toán " + billingMonth.getMonth().getValue() + "/" + billingMonth.getYear()
+                    + " sau ngày kết thúc hợp đồng (" + contract.getEndDate() + ")");
+        }
+
         if (invoiceRepository.existsByContractIdAndBillingMonthAndDeletedFalse(
-                request.getContractId(), request.getBillingMonth())) {
+                request.getContractId(), billingMonth)) {
             throw new RuntimeException("Hóa đơn tháng "
-                    + request.getBillingMonth().getMonth().getValue() + "/"
-                    + request.getBillingMonth().getYear()
+                    + billingMonth.getMonth().getValue() + "/"
+                    + billingMonth.getYear()
                     + " đã được tạo cho hợp đồng này");
         }
 
@@ -67,7 +80,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Lấy chỉ số đầu kỳ từ hóa đơn tháng trước (nếu có)
         Invoice previousInvoice = invoiceRepository
                 .findTopByContractIdAndBillingMonthLessThanAndDeletedFalseOrderByBillingMonthDesc(
-                        request.getContractId(), request.getBillingMonth())
+                        request.getContractId(), billingMonth)
                 .orElse(null);
 
         int electricOld = (previousInvoice != null && previousInvoice.getElectricNew() != null)
@@ -101,7 +114,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         Invoice invoice = Invoice.builder()
                 .contract(contract)
-                .billingMonth(request.getBillingMonth())
+                .billingMonth(billingMonth)
                 .roomFee(roomFee)
                 .electricOld(electricOld)
                 .electricNew(request.getElectricNew())
@@ -118,7 +131,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .networkFee(networkFee)
                 .totalAmount(totalAmount)
                 .status(Invoice.Status.UNPAID)
-                .dueDate(resolveDefaultDueDateForMonth(request.getBillingMonth()))
+                .dueDate(resolveDefaultDueDateForMonth(billingMonth))
                 .build();
 
         return toResponse(invoiceRepository.save(invoice));

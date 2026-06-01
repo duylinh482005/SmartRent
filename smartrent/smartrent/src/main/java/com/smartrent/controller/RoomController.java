@@ -27,6 +27,11 @@ public class RoomController {
                 .body(ApiResponse.success(roomService.create(request)));
     }
 
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<RoomResponse>>> getAll() {
+        return ResponseEntity.ok(ApiResponse.success(roomService.getAll()));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<RoomResponse>> getById(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success(roomService.getById(id)));

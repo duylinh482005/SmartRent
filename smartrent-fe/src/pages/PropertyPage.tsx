@@ -57,7 +57,7 @@ export default function PropertyPage() {
 
   const saveMutation = useMutation({ // hook thay đổi dữ liệu (react query)
     mutationFn: (data: FormData) => { // nhận data từ form
-      const payload: PropertyRequest = { ...data, ownerId: 1 }; // ownerId tạm = 1 // spread data rồi them id
+      const payload: PropertyRequest = { ...data };
       return editing
         ? propertyApi.update(editing.id, payload)
         : propertyApi.create(payload);

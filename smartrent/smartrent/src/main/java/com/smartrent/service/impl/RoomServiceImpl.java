@@ -4,12 +4,18 @@ import com.smartrent.dto.request.RoomRequest;
 import com.smartrent.dto.response.RoomResponse;
 import com.smartrent.entity.Property;
 import com.smartrent.entity.Room;
+import com.smartrent.repository.InvoiceRepository;
 import com.smartrent.repository.PropertyRepository;
 import com.smartrent.repository.RoomRepository;
 import com.smartrent.service.RoomService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import com.smartrent.entity.Invoice;
+import java.time.LocalDateTime;
 
 import java.util.List;
 
@@ -20,13 +26,14 @@ public class RoomServiceImpl implements RoomService {
 
     private final RoomRepository roomRepository;
     private final PropertyRepository propertyRepository;
+    private final InvoiceRepository invoiceRepository;
 
     @Override
     public RoomResponse create(RoomRequest request) {
         Property property = propertyRepository.findById(request.getPropertyId())
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy khu trọ id: " + request.getPropertyId()));
 
-        if (roomRepository.existsByRoomNumberAndPropertyId(request.getRoomNumber(), request.getPropertyId())) {
+        if (roomRepository.existsByRoomNumberAndPropertyIdAndDeletedFalse(request.getRoomNumber(), request.getPropertyId())) {
             throw new RuntimeException("Phòng số '" + request.getRoomNumber() + "' đã tồn tại trong khu trọ này");
         }
 
@@ -50,8 +57,16 @@ public class RoomServiceImpl implements RoomService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<RoomResponse> getAll() {
+        return roomRepository.findAllWithProperty().stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<RoomResponse> getByProperty(Long propertyId) {
-        return roomRepository.findByPropertyId(propertyId).stream()
+        return roomRepository.findByPropertyIdAndDeletedFalse(propertyId).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -59,7 +74,7 @@ public class RoomServiceImpl implements RoomService {
     @Override
     @Transactional(readOnly = true)
     public List<RoomResponse> getByPropertyAndStatus(Long propertyId, Room.Status status) {
-        return roomRepository.findByPropertyIdAndStatus(propertyId, status).stream()
+        return roomRepository.findByPropertyIdAndStatusAndDeletedFalse(propertyId, status).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -67,6 +82,9 @@ public class RoomServiceImpl implements RoomService {
     @Override
     public RoomResponse update(Long id, RoomRequest request) {
         Room room = findById(id);
+        if (roomRepository.existsByRoomNumberAndPropertyIdAndIdNotAndDeletedFalse(request.getRoomNumber(), room.getProperty().getId(), id)) {
+            throw new RuntimeException("Phòng số '" + request.getRoomNumber() + "' đã tồn tại trong khu trọ này");
+        }
         room.setRoomNumber(request.getRoomNumber());
         room.setPrice(request.getPrice());
         room.setArea(request.getArea());
@@ -92,12 +110,28 @@ public class RoomServiceImpl implements RoomService {
         if (room.getStatus() == Room.Status.OCCUPIED) {
             throw new RuntimeException("Không thể xóa phòng đang có người thuê. Hãy chấm dứt hợp đồng trước.");
         }
-        roomRepository.delete(room);
+        if (invoiceRepository.existsByContractRoomIdAndStatusAndDeletedFalse(
+                room.getId(), Invoice.Status.PAID)) {
+            throw new RuntimeException("Không thể xóa: Phòng đã có lịch sử thu tiền, cần lưu trữ để đối soát tài chính");
+        }
+        String deletedBy = getCurrentUsername();
+        room.setDeleted(true);
+        room.setDeletedAt(LocalDateTime.now());
+        room.setDeletedBy(deletedBy);
+        roomRepository.save(room);
     }
 
     private Room findById(Long id) {
-        return roomRepository.findById(id)
+        return roomRepository.findByIdAndDeletedFalse(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phòng id: " + id));
+    }
+
+    private String getCurrentUsername() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) return "system";
+        String username = authentication.getName();
+        if (username == null || username.isBlank() || "anonymousUser".equalsIgnoreCase(username)) return "system";
+        return username;
     }
 
     private RoomResponse toResponse(Room r) {

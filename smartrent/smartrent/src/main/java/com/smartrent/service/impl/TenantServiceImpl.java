@@ -26,11 +26,11 @@ public class TenantServiceImpl implements TenantService {
 
     @Override
     public TenantResponse create(TenantRequest request) {
-        if (tenantRepository.existsByPhone(request.getPhone())) {
+        if (tenantRepository.existsByPhoneAndDeletedFalse(request.getPhone())) {
             throw new RuntimeException("Số điện thoại '" + request.getPhone() + "' đã được đăng ký");
         }
         if (request.getIdCardNumber() != null
-                && tenantRepository.existsByIdCardNumber(request.getIdCardNumber())) {
+                && tenantRepository.existsByIdCardNumberAndDeletedFalse(request.getIdCardNumber())) {
             throw new RuntimeException("CCCD '" + request.getIdCardNumber() + "' đã tồn tại");
         }
 
@@ -67,6 +67,14 @@ public class TenantServiceImpl implements TenantService {
                 throw new RuntimeException("Số điện thoại '" + request.getPhone() + "' đã được dùng");
             }
         });
+
+        if (request.getIdCardNumber() != null) {
+            tenantRepository.findByIdCardNumberAndDeletedFalse(request.getIdCardNumber()).ifPresent(existing -> {
+                if (!existing.getId().equals(id)) {
+                    throw new RuntimeException("CCCD '" + request.getIdCardNumber() + "' đã được dùng");
+                }
+            });
+        }
 
         tenant.setFullName(request.getFullName());
         tenant.setPhone(request.getPhone());

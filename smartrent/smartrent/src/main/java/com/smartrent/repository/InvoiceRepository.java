@@ -24,6 +24,16 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
     List<Invoice> findByStatusAndDeletedFalse(Invoice.Status status);
 
     boolean existsByContractIdAndBillingMonthAndDeletedFalse(Long contractId, LocalDate billingMonth);
+    boolean existsByContractIdAndStatusAndDeletedFalse(Long contractId, Invoice.Status status);
+    boolean existsByContractRoomIdAndStatusAndDeletedFalse(Long roomId, Invoice.Status status);
+
+    @Query("""
+        SELECT COUNT(i) > 0 FROM Invoice i
+        WHERE i.contract.room.property.id = :propertyId
+          AND i.status = 'PAID'
+          AND i.deleted = false
+    """)
+    boolean existsPaidInvoiceByPropertyId(@Param("propertyId") Long propertyId);
 
     Optional<Invoice> findTopByContractIdAndBillingMonthLessThanAndDeletedFalseOrderByBillingMonthDesc(Long contractId, LocalDate billingMonth);
 

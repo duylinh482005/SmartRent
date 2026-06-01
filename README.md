@@ -1,520 +1,479 @@
-﻿# TTCS
+# SmartRent — Tài liệu Kỹ thuật Tổng hợp
+
+> Phiên bản cập nhật: 2026-06-02
+> Dùng cho: onboarding, debug, phân tích nghiệp vụ, Claude Code context
+
+---
+
+## Mục lục
+
+1. [Tổng quan stack](#1-tổng-quan-stack)
+2. [Cấu trúc repo](#2-cấu-trúc-repo)
+3. [Entities & quan hệ dữ liệu](#3-entities--quan-hệ-dữ-liệu)
+4. [Luồng xác thực](#4-luồng-xác-thực)
+5. [Dashboard](#5-dashboard)
+6. [Khu trọ (Property)](#6-khu-trọ-property)
+7. [Phòng (Room)](#7-phòng-room)
+8. [Khách thuê (Tenant)](#8-khách-thuê-tenant)
+9. [Hợp đồng (Contract)](#9-hợp-đồng-contract)
+10. [Hóa đơn (Invoice)](#10-hóa-đơn-invoice)
+11. [AI Assistant](#11-ai-assistant)
+12. [Cron jobs & tự động hóa](#12-cron-jobs--tự-động-hóa)
+13. [Soft delete — quy ước toàn hệ thống](#13-soft-delete--quy-ước-toàn-hệ-thống)
+14. [Business rules tổng hợp](#14-business-rules-tổng-hợp)
+15. [Vấn đề còn tồn tại](#15-vấn-đề-còn-tồn-tại)
+16. [Lịch sử nâng cấp](#16-lịch-sử-nâng-cấp)
+
+---
+
+## 1. Tổng quan stack
+
+| | Frontend | Backend |
+|---|---|---|
+| Framework | React 18 + Vite + TypeScript | Spring Boot 3 + Java 17 |
+| State | TanStack Query (`staleTime: 30s`) + Zustand | JPA/Hibernate |
+| Auth | JWT lưu `localStorage`, interceptor tự inject | Stateless JWT filter, BCrypt |
+| HTTP | `axiosClient` → `http://localhost:8080/api/v1` | REST, `GlobalExceptionHandler` |
+| UI | Tailwind CSS + lucide-react | — |
+| Biểu đồ | Recharts (`BarChart`, `Bar`, `shape` prop) | — |
+| PDF | — | iText / PdfService |
+| AI | — | Spring AI + Groq (`llama-3.3-70b-versatile`) |
+| Favicon | `/public/favicon.svg` (chữ "SR" trắng trên nền xanh #2563eb) | — |
+| Tab title | `SmartRent` (`index.html`) | — |
+
+**Điểm quan trọng cho Claude Code:**
+- FE base URL hard-code `http://localhost:8080/api/v1` trong `axiosClient`.
+- `@EnableScheduling` đã bật trên `SmartrentApplication` — cron job chạy tự động.
+- Mọi lỗi runtime backend đều bị `GlobalExceptionHandler` bắt và trả `{ message: "..." }`.
+- FE hiển thị `message` từ backend qua toast (interceptor `axiosClient`).
+
+---
+
+## 2. Cấu trúc repo
+
+```
+TTCS/
+├── smartrent/smartrent/         # Spring Boot backend
+│   └── src/main/java/com/smartrent/
+│       ├── config/              # AppConfig, SecurityConfig, StaticResourceConfig
+│       ├── controller/          # REST controllers
+│       ├── dto/                 # request/, response/
+│       ├── entity/              # JPA entities
+│       ├── repository/          # Spring Data JPA
+│       ├── service/             # interfaces + impl/
+│       └── SmartrentApplication.java
+├── smartrent-fe/                # React frontend
+│   ├── public/favicon.svg       # SR logo SVG
+│   ├── index.html               # title = SmartRent
+│   └── src/
+│       ├── api/                 # axiosClient + domain APIs
+│       ├── pages/               # route-level components
+│       ├── store/               # Zustand (authStore)
+│       ├── types/               # TypeScript interfaces
+│       └── utils/               # format.ts, v.v.
+└── README.md
+```
+
+---
+
+## 3. Entities & quan hệ dữ liệu
+
+### Quan hệ tổng quát
+
+```
+User (chủ trọ)
+ └── Property (khu trọ) [soft delete]
+      └── Room (phòng) [soft delete]
+           └── Contract (hợp đồng) [soft delete]
+                ├── Tenant (khách thuê) [soft delete]
+                └── Invoice (hóa đơn) [soft delete]
+```
+
+### BaseEntity (kế thừa bởi tất cả entity)
+
+```java
+@CreatedDate  LocalDateTime createdAt;
+@LastModifiedDate LocalDateTime updatedAt;
+```
+
+### Property
+
+| Field | Type | Ghi chú |
+|---|---|---|
+| `owner` | `User` | ManyToOne LAZY |
+| `name` | String | unique theo owner |
+| `address` | String | |
+| `electricUnitPrice` | BigDecimal | default 3500 |
+| `waterUnitPrice` | BigDecimal | default 15000 |
+| `serviceUnitPrice` | BigDecimal | default 0 |
+| `networkFee` | BigDecimal | default 0 |
+| `rooms` | `List<Room>` | CascadeType.ALL + orphanRemoval |
+| `deleted` / `deletedAt` / `deletedBy` | soft delete | cột `is_deleted` |
+
+### Room
+
+| Field | Type | Ghi chú |
+|---|---|---|
+| `property` | `Property` | ManyToOne LAZY |
+| `roomNumber` | String | unique trong cùng property |
+| `price` | BigDecimal | |
+| `status` | Enum | `AVAILABLE` / `OCCUPIED` / `MAINTENANCE` |
+| `area` | Integer | m² |
+| `imageUrl` | String (LONGTEXT) | URL từ upload |
+| `contracts` | `List<Contract>` | CascadeType.ALL |
+| `deleted` / `deletedAt` / `deletedBy` | soft delete | cột `is_deleted` |
+
+### Contract
+
+| Field | Type | Ghi chú |
+|---|---|---|
+| `room` | `Room` | ManyToOne |
+| `tenant` | `Tenant` | ManyToOne |
+| `startDate` / `endDate` | LocalDate | tối thiểu 6 tháng |
+| `monthlyRent` | BigDecimal | |
+| `numberOfPeople` | Integer | dùng để tính `serviceFee` khi tạo hóa đơn |
+| `status` | Enum | `ACTIVE` / `TERMINATED` / `EXPIRED` |
+| `deleted` / `deletedAt` / `deletedBy` | soft delete | |
+
+### Invoice
+
+| Field | Type | Ghi chú |
+|---|---|---|
+| `contract` | `Contract` | ManyToOne |
+| `billingMonth` | LocalDate | **luôn là ngày 1 của tháng** |
+| `roomFee` | BigDecimal | |
+| `electricOld/New/Used/UnitPrice/Fee` | Int/BigDecimal | |
+| `waterOld/New/Used/UnitPrice/Fee` | Int/BigDecimal | |
+| `servicePeople` / `serviceUnitPrice` / `serviceFee` | Int/BigDecimal | số người lấy từ `contract.numberOfPeople` |
+| `networkUnitPrice` / `networkFee` | BigDecimal | |
+| `totalAmount` | BigDecimal | |
+| `status` | Enum | `UNPAID` / `OVERDUE` / `PAID` |
+| `dueDate` | LocalDate | mặc định = cuối tháng billing |
+| `paidAt` | LocalDateTime | |
+| `paymentConfirmedBy` | String | username |
+| `notificationSent` | boolean | |
+| `deleted` / `deletedAt` / `deletedBy` | soft delete | |
+
+### Tenant
+
+| Field | Type | Ghi chú |
+|---|---|---|
+| `fullName` | String | |
+| `phone` | String | unique (soft-delete aware) |
+| `email` | String | |
+| `idCardNumber` | String | unique (soft-delete aware) |
+| `deleted` / `deletedAt` / `deletedBy` | soft delete | |
+
+---
+
+## 4. Luồng xác thực
+
+1. `POST /api/v1/auth/login` hoặc `POST /api/v1/auth/register`
+2. Backend trả JWT; FE lưu `token`, `username`, `role` vào `localStorage` qua `authStore` (Zustand).
+3. `App.tsx` dùng `PrivateRoute` chặn tất cả route nếu `!isAuthenticated`.
+4. `axiosClient` tự gắn `Authorization: Bearer <token>` mọi request.
+5. Backend `SecurityConfig`: public `/api/v1/auth/**` và `/uploads/**`; còn lại yêu cầu JWT.
+6. `401` từ backend → FE xóa `localStorage` + redirect `/login`.
+7. `GET /api/v1/auth/me` — lấy profile user hiện tại (đọc username từ JWT).
+8. `PATCH /api/v1/auth/change-password` — đổi mật khẩu (kiểm tra mật khẩu cũ trước).
+
+**Lưu ý:** Chưa phân quyền theo role (ADMIN/USER) — mọi user authenticated đều dùng được mọi endpoint.
+
+---
+
+## 5. Dashboard
+
+**Route:** `/` → `DashboardPage.tsx`
+
+### Header
+
+- Tiêu đề: `Xin chào, <username>!` — lấy từ `useAuthStore(s => s.username)`
+- Badge phải: `<CalendarDays /> Tháng {M}/{YYYY}` — styled pill màu primary (bg-primary-50, border-primary-100)
+- Không có quick action buttons.
+
+### FE gọi song song 4 API
+
+```
+GET /api/v1/properties
+GET /api/v1/invoices
+GET /api/v1/contracts
+GET /api/v1/rooms
+```
+
+### Tính toán ở FE (không có dashboard endpoint)
+
+| Chỉ số | Cách tính |
+|---|---|
+| Tỷ lệ lấp đầy | `rooms.filter(OCCUPIED).length / rooms.length` |
+| Hợp đồng sắp hết hạn | contract ACTIVE, `endDate` trong 30 ngày |
+| Đã thu tháng này | invoice PAID có `billingMonth` bắt đầu bằng `YYYY-MM` hiện tại |
+| % so tháng trước | so sánh `paidThisMonth` vs `paidLastMonth` |
+| Hóa đơn chưa tạo tháng này | contract ACTIVE không có invoice trong tháng hiện tại |
+
+### Biểu đồ doanh thu 6 tháng
+
+- Dùng Recharts `BarChart` + `Bar` với `shape` prop (custom SVG rect).
+- Tháng hiện tại: fill `#059669` (xanh đậm); các tháng còn lại: `#a7f3d0` (xanh nhạt).
+- **Không dùng `<Cell>`** (deprecated) — màu được truyền qua `shape` prop đọc `entry.current`.
+
+---
+
+## 6. Khu trọ (Property)
+
+**Route:** `/properties` → `PropertyPage.tsx`
+**Backend:** `PropertyController` → `PropertyServiceImpl` → `PropertyRepository`
+
+### API endpoints
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/v1/properties` | Danh sách tất cả (chưa xóa) |
+| POST | `/api/v1/properties` | Tạo mới |
+| PUT | `/api/v1/properties/{id}` | Sửa |
+| DELETE | `/api/v1/properties/{id}` | Soft delete |
+
+### Business rules
+
+- Tên khu trọ phải unique theo owner (`existsByNameAndOwnerIdAndDeletedFalse`).
+- Khi update: check trùng tên loại trừ chính nó (`AndIdNotAndDeletedFalse`).
+- **Xóa bị chặn nếu:**
+  1. Có phòng đang `OCCUPIED` (`existsByPropertyIdAndStatusAndDeletedFalse`).
+  2. Có hóa đơn `PAID` bất kỳ liên quan đến khu trọ (`existsPaidInvoiceByPropertyId`).
+- Xóa là **soft delete**: set `deleted=true`, `deletedAt`, `deletedBy`.
+- `totalRooms` trong response = số phòng chưa bị soft delete (`rooms.stream().filter(!deleted).count()`).
+
+### Lưu ý FE
+
+- `ownerId: 1` đang hard-code khi tạo/sửa — chưa lấy theo user đang đăng nhập.
+
+---
+
+## 7. Phòng (Room)
+
+**Route:** `/rooms` → `RoomPage.tsx`
+**Backend:** `RoomController` → `RoomServiceImpl` → `RoomRepository`
+
+### API endpoints
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/v1/rooms` | Tất cả phòng (findAllWithProperty) |
+| GET | `/api/v1/rooms/{id}` | Theo id |
+| GET | `/api/v1/rooms/property/{propertyId}` | Theo khu trọ (+ filter status) |
+| POST | `/api/v1/rooms` | Tạo mới |
+| PUT | `/api/v1/rooms/{id}` | Sửa |
+| PATCH | `/api/v1/rooms/{id}/status` | Đổi trạng thái |
+| DELETE | `/api/v1/rooms/{id}` | Soft delete |
+| POST | `/api/v1/uploads/rooms` | Upload ảnh |
+
+### Business rules
+
+- `roomNumber` phải unique trong cùng `propertyId`.
+  - Khi **create**: `existsByRoomNumberAndPropertyIdAndDeletedFalse`.
+  - Khi **update**: `existsByRoomNumberAndPropertyIdAndIdNotAndDeletedFalse`.
+- `PATCH status` chỉ cho phép nếu phòng không phải `OCCUPIED` (FE enforce, backend không chặn cứng).
+- **Xóa bị chặn nếu:**
+  - Có hóa đơn `PAID` liên quan đến phòng (`existsByContractRoomIdAndStatusAndDeletedFalse`).
+- Xóa là **soft delete**.
+
+### Upload ảnh
+
+- `POST /api/v1/uploads/rooms` → `FileStorageServiceImpl#storeRoomImage`
+- Validate: `image/*`, extension `.jpg/.jpeg/.png/.webp/.gif`
+- Lưu vào `uploads/rooms/<uuid>.<ext>`; trả URL tuyệt đối `/uploads/rooms/...`
+- `StaticResourceConfig` map `/uploads/**` ra thư mục thật trên disk.
+
+---
+
+## 8. Khách thuê (Tenant)
 
-## Mục tiêu tài liệu
+**Route:** `/tenants` → `TenantPage.tsx`
+**Backend:** `TenantController` → `TenantServiceImpl` → `TenantRepository`
+
+### API endpoints
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/v1/tenants` | Danh sách tất cả |
+| POST | `/api/v1/tenants` | Tạo mới |
+| PUT | `/api/v1/tenants/{id}` | Sửa |
+| DELETE | `/api/v1/tenants/{id}` | Soft delete |
+
+### Business rules
+
+- **Create:**
+  - `phone` phải unique (chỉ check bản ghi chưa xóa — `existsByPhoneAndDeletedFalse`).
+  - `idCardNumber` nếu có phải unique (chỉ check chưa xóa — `existsByIdCardNumberAndDeletedFalse`).
+- **Update:**
+  - Check phone bị tenant khác dùng chưa.
+  - Check CCCD bị tenant khác dùng chưa (`findByIdCardNumberAndDeletedFalse` → so sánh id).
+- **Lưu ý lịch sử:** Các tenant đã soft-delete không tính vào check uniqueness → tránh chặn nhầm khi thêm lại cùng số điện thoại/CCCD sau khi xóa.
+
+### FE
+
+- Search là filter client-side theo `fullName` + `phone` — không có API search riêng.
+- Từ trang hợp đồng có thể điều hướng sang `/tenants?tenantId=<id>` để highlight đúng khách.
+- FE gọi thêm `contractApi.getAll()` để group hợp đồng theo khách thuê.
+
+---
+
+## 9. Hợp đồng (Contract)
 
-Tài liệu này ghi lại luồng hoạt động từ giao diện admin xuống backend cho các chức năng:
+**Route:** `/contracts` → `ContractPage.tsx`
+**Backend:** `ContractController` → `ContractServiceImpl` → `ContractRepository`
 
-- Dashboard
-- Hồ sơ cá nhân
-- Khu trọ
-- Phòng
-- Khách thuê
-- Hợp đồng
-- Hóa đơn
-- AI Assistant
+### API endpoints
 
-Ngoài ra có thêm phần ghi nhận các file/thư mục có dấu hiệu là file rác, file debug, file sinh ra khi build hoặc file có khả năng không còn được dùng. Chưa xóa file nào.
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/v1/contracts` | Tất cả (chưa xóa) |
+| GET | `/api/v1/contracts/{id}` | Theo id |
+| GET | `/api/v1/contracts/room/{roomId}` | Theo phòng |
+| GET | `/api/v1/contracts/tenant/{tenantId}` | Theo khách thuê |
+| POST | `/api/v1/contracts` | Tạo mới |
+| PUT | `/api/v1/contracts/{id}` | Sửa |
+| PATCH | `/api/v1/contracts/{id}/terminate` | Chấm dứt |
+| DELETE | `/api/v1/contracts/{id}` | Soft delete |
 
-## Cấu trúc repo
+### Business rules — CREATE
 
-- `smartrent-fe`: frontend React + Vite + TanStack Query + Zustand
-- `smartrent/smartrent`: backend Spring Boot
-- `README.md`: tài liệu tổng hợp ở root
+1. `startDate` không được ở quá khứ.
+2. `endDate` phải sau `startDate`.
+3. Thời hạn tối thiểu **6 tháng** (`endDate >= startDate + 6 months`).
+4. Phòng phải `AVAILABLE`.
+5. Phòng không được có contract `ACTIVE` khác.
+6. Khi tạo xong: `room.status → OCCUPIED`.
 
-## Luồng chung từ admin UI xuống backend
+### Business rules — UPDATE
 
-1. Admin đăng nhập ở `smartrent-fe/src/pages/LoginPage.tsx`.
-2. FE gọi `authApi` -> `POST /api/v1/auth/login` hoặc `POST /api/v1/auth/register`.
-3. Backend trả JWT; FE lưu `token`, `username`, `role` vào `localStorage` qua `authStore`.
-4. `App.tsx` dùng `PrivateRoute` để chặn toàn bộ route admin nếu chưa có token.
-5. Mọi API business từ FE đều đi qua `axiosClient` với base URL `http://localhost:8080/api/v1`.
-6. `axiosClient` tự gắn header `Authorization: Bearer <token>`.
-7. Backend `SecurityConfig` cho phép public với `/api/v1/auth/**` và `/uploads/**`, còn lại phải xác thực JWT.
-8. Nếu backend trả lỗi:
-   - FE hiển thị toast qua `axiosClient`.
-   - `401` sẽ tự xóa localStorage và đẩy người dùng về `/login`.
-   - Backend gom lỗi validate/runtime qua `GlobalExceptionHandler`.
+1. Không sửa được contract `TERMINATED`.
+2. `endDate` mới phải sau `startDate` gốc.
+3. `endDate` mới phải đảm bảo tối thiểu **6 tháng** tính từ `startDate` gốc.
+4. `monthlyRent` phải > 0.
+5. `numberOfPeople` phải ≥ 1.
 
-### Bổ sung: Hồ sơ người đang đăng nhập
+### Business rules — TERMINATE
 
-- Từ block user ở cuối `Sidebar`, admin có thể vào `/profile`.
-- FE gọi `GET /api/v1/auth/me` để lấy thông tin tài khoản hiện tại.
-- FE gọi `PATCH /api/v1/auth/change-password` để đổi mật khẩu.
-- Backend đọc username từ JWT hiện tại, sau đó:
-  - tìm đúng user đang đăng nhập
-  - trả profile chi tiết
-  - kiểm tra mật khẩu hiện tại trước khi đổi mật khẩu mới
+1. Chỉ terminate được contract đang `ACTIVE`.
+2. **Bị chặn nếu còn nợ** (`sumOutstandingByContractId > 0`) — bao gồm cả UNPAID và OVERDUE.
+3. Khi terminate: `contract.status → TERMINATED`, `room.status → AVAILABLE`.
 
-## 1. Dashboard
+### Business rules — DELETE (soft delete)
 
-### Route UI
+Delete bị chặn nếu bất kỳ điều kiện nào sau đây đúng:
 
-- Sidebar -> `/`
-- Component chính: `smartrent-fe/src/pages/DashboardPage.tsx`
+| Điều kiện | Lỗi trả về |
+|---|---|
+| Contract đang ACTIVE (đã bắt đầu, chưa kết thúc) | "Không thể xóa: Hợp đồng đang có hiệu lực" |
+| Đã có invoice của kỳ billing tháng hiện tại | "Không thể xóa: Hợp đồng đang trong kỳ thanh toán hiện tại" |
+| Còn nợ chưa thanh toán | "Không thể xóa: Khách thuê còn nợ Xđ chưa thanh toán" |
+| Đã có invoice PAID (lịch sử thu tiền) | "Không thể xóa: Hợp đồng đã có lịch sử thu tiền, cần lưu trữ để đối soát tài chính" |
+| Trạng thái không thỏa rule | "Không thể xóa: Chỉ cho phép xóa hợp đồng đã chấm dứt, hết hạn hoặc chưa đến ngày bắt đầu" |
 
-### FE gọi gì
+Khi xóa được: `deleted=true`, `deletedAt`, `deletedBy`. Nếu phòng đang `OCCUPIED` thì trả về `AVAILABLE`.
 
-Dashboard không có API tổng hợp riêng. FE gọi song song:
+### Tự động hết hạn (Cron)
 
-- `propertyApi.getAll()` -> `GET /api/v1/properties`
-- `invoiceApi.getAll()` -> `GET /api/v1/invoices`
-- `contractApi.getAll()` -> `GET /api/v1/contracts`
+- Cron `0 5 0 * * *` (00:05 Asia/Ho_Chi_Minh): tìm tất cả contract `ACTIVE` có `endDate < today`, chuyển → `EXPIRED`, trả phòng về `AVAILABLE`.
+- Xem chi tiết ở [mục 12](#12-cron-jobs--tự-động-hóa).
 
-### FE xử lý dữ liệu
+---
 
-Sau khi lấy dữ liệu, `DashboardPage` tự tính trên client:
+## 10. Hóa đơn (Invoice)
 
-- Tổng khu trọ = `properties.length`
-- Tổng phòng = cộng `property.totalRooms`
-- Hợp đồng đang hiệu lực = filter `contract.status === ACTIVE`
-- Hóa đơn chưa thu = filter `invoice.status === UNPAID || OVERDUE`
-- Danh sách hợp đồng sắp hết hạn = contract `ACTIVE` và `endDate` trong 30 ngày tới
-- Khối “Đã thu” đang cộng toàn bộ hóa đơn `PAID`
+**Route:** `/invoices` → `InvoicePage.tsx`
+**Backend:** `InvoiceController` → `InvoiceServiceImpl` → `InvoiceRepository`
 
-### Backend đi qua đâu
+### API endpoints
 
-- `PropertyController` -> `PropertyServiceImpl#getAll` -> `PropertyRepository.findAll`
-- `InvoiceController` -> `InvoiceServiceImpl#getAll` -> `InvoiceRepository.findByDeletedFalse`
-- `ContractController` -> `ContractServiceImpl#getAll` -> `ContractRepository.findByDeletedFalse`
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/v1/invoices` | Tất cả (chưa xóa) |
+| GET | `/api/v1/invoices/{id}` | Theo id |
+| GET | `/api/v1/invoices/contract/{contractId}` | Theo hợp đồng |
+| POST | `/api/v1/invoices` | Tạo mới |
+| PATCH | `/api/v1/invoices/{id}/mark-paid` | Đánh dấu đã thu |
+| DELETE | `/api/v1/invoices/{id}` | Soft delete |
+| GET | `/api/v1/invoices/{id}/pdf` | Tải PDF |
 
-### Ghi chú
+### Business rules — CREATE
 
-- Không có `dashboard endpoint`; thống kê đang ghép ở FE.
-- Biến `paidThisMonth` ở FE tên là “tháng này” nhưng thực tế chưa lọc theo tháng, chỉ lọc theo trạng thái `PAID`.
+1. `billingMonth` **luôn được normalize về ngày 1** (`withDayOfMonth(1)`) ngay khi vào service.
+2. Contract phải tồn tại và đang `ACTIVE`.
+3. **`billingMonth` phải nằm trong khoảng** `[contract.startDate, contract.endDate]` (đều normalize về ngày 1).
+4. Không tạo trùng hóa đơn cùng `contractId + billingMonth`.
+5. `electricNew >= electricOld` (lấy từ hóa đơn tháng trước của cùng contract).
+6. `waterNew >= waterOld`.
+7. `servicePeople` lấy tự động từ `contract.numberOfPeople` — không nhận từ request.
+8. `dueDate` mặc định = cuối tháng `billingMonth`.
 
-## 2. Khu trọ
+**Request payload từ FE:** `contractId`, `billingMonth`, `electricNew`, `waterNew`.
 
-### Route UI
+### Business rules — DELETE
 
-- Sidebar -> `/properties`
-- Component chính: `smartrent-fe/src/pages/PropertyPage.tsx`
+- Bị chặn nếu: đã `PAID`, `notificationSent=true`, hoặc đang `OVERDUE`.
+- Chỉ xóa được invoice `UNPAID` chưa gửi thông báo.
 
-### Các luồng chính
+### Tự động quá hạn (Cron)
 
-#### Xem danh sách khu trọ
+- Cron `0 10 0 * * *` (00:10 Asia/Ho_Chi_Minh): `UNPAID` quá `dueDate` → `OVERDUE`.
 
-- FE mở trang sẽ gọi `propertyApi.getAll()` -> `GET /api/v1/properties`
-- Backend: `PropertyController#getAll` -> `PropertyServiceImpl#getAll` -> `PropertyRepository.findAll`
-- Response trả về `PropertyResponse`, trong đó `totalRooms` được tính từ `p.getRooms().size()`
+### FE tự điền chỉ số cũ
 
-#### Tạo khu trọ
+FE duyệt tập invoice đã tải để tìm hóa đơn tháng trước của cùng phòng, set default vào form.
+Không có API riêng cho "chỉ số cũ".
 
-- FE submit modal -> `propertyApi.create(payload)` -> `POST /api/v1/properties`
-- `payload` gồm `name`, `address`, `description`, `ownerId`
-- Backend:
-  - `PropertyController#create`
-  - `PropertyServiceImpl#create`
-  - `UserRepository.findById(ownerId)` để tìm chủ
-  - kiểm tra trùng tên theo owner: `existsByNameAndOwnerId`
-  - lưu `PropertyRepository.save`
+---
 
-#### Sửa khu trọ
+## 11. AI Assistant
 
-- FE -> `PUT /api/v1/properties/{id}`
-- Backend:
-  - tìm property theo id
-  - cập nhật `name`, `address`, `description`
-  - `PropertyRepository.save`
-
-#### Xóa khu trọ
-
-- FE -> `DELETE /api/v1/properties/{id}`
-- Backend:
-  - tìm property
-  - `PropertyRepository.delete`
-
-### Ghi chú
-
-- FE đang hard-code `ownerId: 1` khi tạo/sửa khu trọ. Đây là ràng buộc ở frontend, chưa lấy theo user đăng nhập hiện tại.
-
-## 3. Phòng
-
-### Route UI
-
-- Sidebar -> `/rooms`
-- Component chính: `smartrent-fe/src/pages/RoomPage.tsx`
-
-### Các luồng chính
-
-#### Tải danh sách khu trọ để lọc/chọn
-
-- FE gọi `propertyApi.getAll()` -> `GET /api/v1/properties`
-- Dùng cho dropdown chọn khu trọ trước khi xem danh sách phòng
-
-#### Xem danh sách phòng theo khu trọ
-
-- FE chỉ gọi khi đã chọn khu trọ
-- `roomApi.getByProperty(propertyId, status?)` -> `GET /api/v1/rooms/property/{propertyId}?status=...`
-- Backend:
-  - `RoomController#getByProperty`
-  - nếu có `status` -> `RoomServiceImpl#getByPropertyAndStatus`
-  - nếu không có `status` -> `RoomServiceImpl#getByProperty`
-  - repository đọc theo `propertyId` và tùy chọn trạng thái
-
-#### Upload ảnh phòng
-
-- FE chọn file ảnh -> `roomApi.uploadRoomImage(file)` -> `POST /api/v1/uploads/rooms`
-- Backend:
-  - `UploadController#uploadRoomImage`
-  - `FileStorageServiceImpl#storeRoomImage`
-  - validate `image/*`, validate extension `.jpg/.jpeg/.png/.webp/.gif`
-  - lưu vào `uploads/rooms/<uuid>.<ext>`
-  - trả URL tuyệt đối `/uploads/rooms/...`
-- `StaticResourceConfig` map `/uploads/**` ra thư mục upload thật trên máy
-
-#### Tạo phòng
-
-- FE submit modal -> `POST /api/v1/rooms`
-- Payload: `roomNumber`, `price`, `area`, `description`, `imageUrl`, `propertyId`
-- Backend:
-  - `RoomController#create`
-  - `RoomServiceImpl#create`
-  - tìm `Property`
-  - check trùng số phòng trong cùng khu trọ bằng `existsByRoomNumberAndPropertyId`
-  - tạo `Room` mới, trạng thái mặc định `AVAILABLE`
-  - `RoomRepository.save`
-
-#### Sửa phòng
-
-- FE -> `PUT /api/v1/rooms/{id}`
-- Backend:
-  - `RoomServiceImpl#update`
-  - cập nhật `roomNumber`, `price`, `area`, `description`, `imageUrl`
-
-#### Đổi trạng thái phòng
-
-- Chỉ có khi sửa phòng
-- FE chỉ gọi `PATCH /api/v1/rooms/{id}/status?status=...` nếu:
-  - đang edit
-  - trạng thái mới khác trạng thái cũ
-  - phòng hiện tại không phải `OCCUPIED`
-- Backend: `RoomServiceImpl#updateStatus`
-
-#### Xóa phòng
-
-- FE -> `DELETE /api/v1/rooms/{id}`
-- Backend: `RoomServiceImpl#delete` -> `RoomRepository.delete`
-
-### Ghi chú
-
-- FE không cho đổi phòng đang `OCCUPIED` sang `MAINTENANCE`.
-- Backend `update` phòng không tự kiểm tra trùng `roomNumber` khi sửa; kiểm tra trùng hiện mới nằm ở luồng create.
-
-## 4. Khách thuê
-
-### Route UI
-
-- Sidebar -> `/tenants`
-- Component chính: `smartrent-fe/src/pages/TenantPage.tsx`
-
-### Các luồng chính
-
-#### Xem danh sách khách thuê
-
-- FE gọi `tenantApi.getAll()` -> `GET /api/v1/tenants`
-- Backend:
-  - `TenantController#getAll`
-  - `TenantServiceImpl#getAll`
-  - `TenantRepository.findAll`
-
-#### Ghép danh sách hợp đồng theo từng khách thuê
-
-- Cùng lúc FE gọi thêm `contractApi.getAll()` -> `GET /api/v1/contracts`
-- FE tự group `contractsByTenant` để hiển thị hợp đồng nào đang gắn với từng khách thuê
-
-#### Tạo khách thuê
-
-- FE submit modal -> `POST /api/v1/tenants`
-- Backend:
-  - `TenantController#create`
-  - `TenantServiceImpl#create`
-  - check trùng `phone`
-  - nếu có CCCD thì check trùng `idCardNumber`
-  - lưu `TenantRepository.save`
-
-#### Sửa khách thuê
-
-- FE -> `PUT /api/v1/tenants/{id}`
-- Backend:
-  - `TenantServiceImpl#update`
-  - tìm tenant theo id
-  - check `phone` có bị dùng bởi tenant khác không
-  - cập nhật `fullName`, `phone`, `email`, `idCardNumber`
-
-#### Xóa khách thuê
-
-- FE -> `DELETE /api/v1/tenants/{id}`
-- Backend: `TenantServiceImpl#delete` -> `TenantRepository.delete`
-
-### Ghi chú
-
-- Ô search ở trang khách thuê là filter thuần FE theo `fullName` và `phone`, không có API search riêng.
-- Từ trang hợp đồng có thể điều hướng sang `/tenants?tenantId=<id>` để highlight đúng khách thuê.
-
-## 5. Hợp đồng
-
-### Route UI
-
-- Sidebar -> `/contracts`
-- Component chính: `smartrent-fe/src/pages/ContractPage.tsx`
-
-### Các luồng chính
-
-#### Xem danh sách hợp đồng
-
-- FE gọi `contractApi.getAll()` -> `GET /api/v1/contracts`
-- Backend:
-  - `ContractController#getAll`
-  - `ContractServiceImpl#getAll`
-  - `ContractRepository.findByDeletedFalse`
-
-#### Bổ sung tên khu trọ cho từng hợp đồng
-
-- Sau khi có danh sách hợp đồng, FE lấy các `roomId` rồi gọi nhiều request:
-  - `roomApi.getById(roomId)` -> `GET /api/v1/rooms/{id}`
-- Mục đích: dựng `roomPropertyMap` để hiện tên khu trọ trong bảng hợp đồng
-- Đây là bước ghép dữ liệu ở FE, không phải backend trả sẵn cho riêng màn lọc
-
-#### Lấy dữ liệu để tạo hợp đồng
-
-- FE gọi:
-  - `propertyApi.getAll()` để chọn khu trọ
-  - `roomApi.getByProperty(propertyId, 'AVAILABLE')` để lấy phòng còn trống
-  - `tenantApi.getAll()` để chọn khách thuê
-
-#### Tạo nhanh khách thuê ngay trong form hợp đồng
-
-- FE mở modal “Thêm nhanh khách thuê”
-- Gọi `tenantApi.create()` -> `POST /api/v1/tenants`
-- Nếu thành công:
-  - invalidate query `tenants`
-  - tự set `tenantId` vừa tạo vào form hợp đồng
-
-#### Tạo hợp đồng
-
-- FE submit -> `POST /api/v1/contracts`
-- Backend:
-  - `ContractController#create`
-  - `ContractServiceImpl#create`
-  - validate:
-    - `startDate` không ở quá khứ
-    - `endDate` phải sau `startDate`
-    - thời hạn tối thiểu 6 tháng
-  - tìm `Room`, bắt buộc phòng đang `AVAILABLE`
-  - check chưa có hợp đồng `ACTIVE` khác cho cùng phòng
-  - tìm `Tenant`
-  - tạo `Contract` trạng thái `ACTIVE`, lưu thêm `numberOfPeople`
-  - đồng thời đổi `Room.status = OCCUPIED`
-  - lưu room rồi lưu contract
-
-#### Chấm dứt hợp đồng
-
-- FE -> `PATCH /api/v1/contracts/{id}/terminate`
-- Backend:
-  - chỉ cho phép nếu contract đang `ACTIVE`
-  - đổi `Contract.status = TERMINATED`
-  - đổi `Room.status = AVAILABLE`
-
-#### Xóa hợp đồng
-
-- FE -> `DELETE /api/v1/contracts/{id}`
-- Backend thực hiện soft delete, không xóa cứng:
-  - `deleted = true`
-  - `deletedAt`
-  - `deletedBy`
-- Trước khi soft delete, backend chặn nếu:
-  - hợp đồng đang có hiệu lực
-  - đã có hóa đơn kỳ hiện tại
-  - còn công nợ chưa thanh toán
-  - đã có lịch sử payment
-  - đã phát sinh hóa đơn
-  - trạng thái không thỏa rule cho phép xóa
-- Nếu phòng đang `OCCUPIED`, backend trả phòng về `AVAILABLE`
-
-### Ghi chú
-
-- Bộ lọc theo tên khách thuê, phòng, ngày hết hạn, trạng thái đang chạy ở FE.
-- FE có fuzzy search theo tên khách thuê, không có endpoint search riêng.
-
-## 6. Hóa đơn
-
-### Route UI
-
-- Sidebar -> `/invoices`
-- Component chính: `smartrent-fe/src/pages/InvoicePage.tsx`
-
-### Các luồng chính
-
-#### Xem danh sách hóa đơn
-
-- FE gọi `invoiceApi.getAll()` -> `GET /api/v1/invoices`
-- Backend:
-  - `InvoiceController#getAll`
-  - nếu có `status` thì `InvoiceServiceImpl#getByStatus`
-  - nếu không có thì `InvoiceServiceImpl#getAll`
-  - chỉ lấy invoice chưa bị soft delete
-
-#### Lấy dữ liệu phụ để tạo hóa đơn
-
-- FE gọi thêm:
-  - `propertyApi.getAll()`
-  - `contractApi.getAll()`
-- FE tự lọc các hợp đồng `ACTIVE`, từ đó dựng:
-  - danh sách khu trọ quản lý
-  - danh sách phòng có hợp đồng hiệu lực
-  - danh sách hợp đồng của phòng đã chọn
-
-#### Tự điền chỉ số từ tháng trước
-
-- FE không gọi API riêng cho “chỉ số cũ”.
-- FE tự duyệt tập invoice đã tải để tìm:
-  - hóa đơn tháng trước của cùng phòng
-  - hóa đơn gần nhất trong cùng khu trọ để gợi ý đơn giá điện/nước
-- Sau đó set default vào form bằng `react-hook-form`
-
-#### Tạo hóa đơn
-
-- FE submit -> `POST /api/v1/invoices`
-- Trước khi gửi, FE chặn:
-  - chưa chọn khu trọ/phòng/hợp đồng
-  - tạo cho tháng ngoài tập cho phép
-  - chỉ số điện/nước cuối < đầu
-  - đơn giá điện/nước <= 0
-  - trùng hóa đơn cùng tháng thì bật modal xác nhận tạo thêm
-- Payload FE gửi chỉ gồm: `contractId`, `billingMonth`, `electricNew`, `waterNew` (không có `servicePeople`)
-- Backend:
-  - `InvoiceController#create`
-  - `InvoiceServiceImpl#create`
-  - tìm contract chưa bị xóa
-  - contract phải đang `ACTIVE`
-  - check trùng `contractId + billingMonth`
-  - check lại chỉ số điện/nước
-  - lấy `servicePeople` tự động từ `contract.getNumberOfPeople()` (không nhận từ request)
-  - tính:
-    - `roomFee`
-    - `electricFee`
-    - `waterFee`
-    - `serviceFee = serviceUnitPrice × contract.numberOfPeople`
-    - `networkFee`
-    - `totalAmount`
-  - set `status = UNPAID`
-  - set `dueDate` mặc định là cuối tháng billing
-  - lưu invoice
-
-#### Đánh dấu đã thanh toán
-
-- FE bấm icon xác nhận -> `PATCH /api/v1/invoices/{id}/mark-paid`
-- Backend:
-  - chỉ cho phép từ `UNPAID` hoặc `OVERDUE`
-  - đổi `status = PAID`
-  - set `paidAt = now`
-  - set `paymentConfirmedBy = username từ SecurityContext`
-
-#### Tải PDF hóa đơn
-
-- FE -> `GET /api/v1/invoices/{id}/pdf`
-- Backend:
-  - `InvoiceController#downloadPdf`
-  - gọi `InvoiceServiceImpl#getById`
-  - gọi `PdfService.generateInvoicePdf(invoice)`
-  - trả file PDF với header `attachment`
-
-#### Xóa hóa đơn
-
-- FE trước tiên tự chặn trên UI nếu:
-  - hóa đơn đã `PAID`
-  - `notificationSent = true`
-  - hóa đơn `OVERDUE`
-- Nếu qua được FE, request `DELETE /api/v1/invoices/{id}` sẽ vào backend
-- Backend vẫn kiểm tra lại và soft delete:
-  - `deleted = true`
-  - `deletedAt`
-  - `deletedBy`
-
-#### Cron chuyển quá hạn
-
-- Backend có job `@Scheduled(cron = "0 10 0 * * *", zone = "Asia/Ho_Chi_Minh")`
-- Mỗi ngày lúc `00:10`, mọi invoice `UNPAID` quá `dueDate` sẽ bị chuyển sang `OVERDUE`
-
-### Ghi chú
-
-- Rule “chỉ cho tạo tháng hiện tại hoặc tháng trước” hiện nằm chủ yếu ở FE.
-- Backend vẫn có rule chống trùng theo `contractId + billingMonth`, nên kể cả FE bypass thì duplicate theo cùng contract vẫn bị chặn.
-
-## 7. AI Assistant
-
-### Route UI
-
-- Sidebar -> `/ai`
-- Component chính: `smartrent-fe/src/pages/AiChatPage.tsx`
+**Route:** `/ai` → `AiChatPage.tsx`
+**Backend:** `AiController` → `AiServiceImpl` → `AiContextServiceImpl`
 
 ### Luồng chat
 
-1. Admin nhập câu hỏi hoặc bấm gợi ý trong sidebar.
-2. FE gọi `aiApi.chat(message)` -> `POST /api/v1/ai/chat`.
-3. Backend vào `AiController#chat` -> `AiServiceImpl#chat`.
-4. `AiServiceImpl` kiểm tra `tryHandleDirectAction`:
-   - Nếu câu chứa keyword hành động trực tiếp (đánh dấu đã thu / chấm dứt hợp đồng): gọi service tương ứng, **không qua LLM**, trả kết quả ngay.
-   - Nếu không: tiếp tục xuống LLM.
-5. Kiểm tra `ChatClient.Builder` có sẵn không (fallback nếu chưa cấu hình AI profile).
-6. `AiContextServiceImpl#buildContext()` load toàn bộ dữ liệu từ DB, xây dựng context văn bản.
-7. Backend ghép `system prompt + context + câu hỏi` rồi gửi qua Spring AI sang model.
-8. Backend trả `AiChatResponse { question, answer }`.
-9. FE thay bubble loading `...` bằng câu trả lời thật.
+1. `POST /api/v1/ai/chat` với `{ message: "..." }`
+2. `AiServiceImpl#tryHandleDirectAction` — nhận diện keyword hành động trực tiếp:
+   - "đánh dấu đã thu / đã thanh toán / xác nhận thanh toán" → `InvoiceService#markAsPaid` cho từng `#ID`
+   - "chấm dứt hợp đồng / kết thúc hợp đồng" → `ContractService#terminate` cho `#ID` đầu tiên
+3. Nếu không phải direct action → `AiContextServiceImpl#buildContext()` build context từ DB (cache 2 phút).
+4. Ghép `system prompt + context + câu hỏi` → Spring AI → Groq `llama-3.3-70b-versatile`.
+5. Trả `AiChatResponse { question, answer }`.
 
-### Hành động trực tiếp qua chat
+### Cấu hình AI
 
-`AiServiceImpl#tryHandleDirectAction` nhận diện keyword và thực thi ngay, **không tốn token LLM**:
+```properties
+# application-groq.properties
+spring.ai.openai.chat.options.model=llama-3.3-70b-versatile
+spring.ai.openai.chat.options.temperature=0.3
+spring.ai.retry.max-attempts=3
+spring.ai.retry.backoff.initial-interval=3000
+spring.ai.retry.backoff.max-interval=10000
+spring.ai.retry.backoff.multiplier=2
+spring.ai.retry.on-http-codes=429
+```
 
-| Keyword nhận diện | Hành động | Service gọi |
-|---|---|---|
-| "đánh dấu đã thu" / "đánh dấu đã thanh toán" / "xác nhận thanh toán" | Đánh dấu PAID các hóa đơn có `#ID` trong câu | `InvoiceService#markAsPaid` |
-| "chấm dứt hợp đồng" / "kết thúc hợp đồng" | Chấm dứt hợp đồng `#ID` đầu tiên tìm thấy | `ContractService#terminate` |
+Nếu không có `ChatClient.Builder` (chạy thiếu AI profile), trả fallback message hướng dẫn.
 
-**Quy ước `#ID`**: người dùng nhập `#số` trong câu chat để chỉ định đối tượng. Ví dụ:
-- `Đánh dấu đã thanh toán hóa đơn #5 #8 #12`
-- `Chấm dứt hợp đồng #3`
-
-Nếu thiếu ID, AI trả hướng dẫn kèm ví dụ định dạng đúng thay vì báo lỗi kỹ thuật.
-
-### Context AI lấy từ đâu
-
-`AiContextServiceImpl#buildContext()` dùng 5 repository với JOIN FETCH query (tránh N+1), xây dựng 11 section:
+### Context sections (13 sections)
 
 | Section | Nội dung |
 |---|---|
-| Khu trọ | Tên, địa chỉ, số phòng theo từng trạng thái (trống/thuê/bảo trì) |
-| Tất cả phòng | Trạng thái, giá, diện tích, khách đang ở + số HĐ |
-| Khách thuê | Họ tên, SĐT, email, CCCD, hợp đồng đang thuê hiện tại |
-| HĐ đang hiệu lực | Đầy đủ thông tin, cảnh báo `[SAP HET HAN]` ≤30 ngày, `[GAN HET HAN]` ≤60 ngày |
-| HĐ đã kết thúc | 10 hợp đồng gần nhất (TERMINATED / EXPIRED) |
-| Hóa đơn UNPAID | Chi tiết từng hóa đơn chưa thu + hạn thanh toán |
+| Khu trọ | Tên, địa chỉ, số phòng theo trạng thái |
+| Tất cả phòng | Trạng thái, giá, diện tích, khách đang ở |
+| Khách thuê | Họ tên, SĐT, email, CCCD, hợp đồng hiện tại |
+| HĐ đang hiệu lực | Đầy đủ, cảnh báo `[SAP HET HAN]` ≤30 ngày, `[GAN HET HAN]` ≤60 ngày |
+| HĐ đã kết thúc | 10 HĐ gần nhất (TERMINATED/EXPIRED) |
+| Hóa đơn UNPAID | Chi tiết + hạn thanh toán |
 | Hóa đơn OVERDUE | Chi tiết + số ngày quá hạn + SĐT khách |
 | Doanh thu 12 tháng | Theo tháng + % ±so tháng trước + tóm tắt theo quý |
-| Phân tích phòng trống | Ngày trống, lý do (HĐ cũ / chưa từng có HĐ), cảnh báo >30/60/90 ngày, doanh thu bị mất |
-| Hành vi thanh toán | Khách đang OVERDUE + lịch sử trễ PAID (số lần, TB ngày, max ngày) |
-| Hóa đơn chưa tạo | HĐ đang ACTIVE chưa có hóa đơn tháng hiện tại |
-| Hiệu suất khu trọ | Tỷ lệ lấp đầy, doanh thu tháng + % vs tháng trước, nợ QH, tiềm năng |
-| Thống kê tổng quan | Tỷ lệ lấp đầy, tổng nợ UNPAID + OVERDUE, đã thu tháng này, doanh thu lý thuyết |
+| Phân tích phòng trống | Ngày trống, lý do, cảnh báo >30/60/90 ngày, doanh thu bị mất |
+| Hành vi thanh toán | Khách OVERDUE + lịch sử trễ (số lần, TB ngày, max ngày) |
+| Hóa đơn chưa tạo | HĐ ACTIVE chưa có invoice tháng hiện tại |
+| Hiệu suất khu trọ | Tỷ lệ lấp đầy, doanh thu tháng + % vs tháng trước |
+| Thống kê tổng quan | Tỷ lệ lấp đầy, tổng nợ, đã thu tháng này |
 
-**Query được tối ưu (JOIN FETCH, không N+1):**
-
-- `RoomRepository#findAllWithProperty` — load room kèm property
-- `ContractRepository#findAllNonDeletedWithDetails` — load contract kèm room + property + tenant
-- `InvoiceRepository#findAllByStatusWithDetails` — load invoice theo status kèm contract chain
-- `InvoiceRepository#findAllNonDeletedSinceWithDetails` — 13 tháng gần nhất cho phân tích trend
-
-### System Prompt
-
-AI được hướng dẫn:
-- Trả lời dựa trên dữ liệu thực, không bịa đặt
-- Phân tích và so sánh doanh thu theo tháng/quý/năm, tính % tăng giảm
-- Đưa lời khuyên cụ thể theo từng tình huống (phòng trống lâu → gợi ý giảm giá/marketing; khách trễ hạn → nhắc sớm/tăng đặt cọc; HĐ hết hạn → liên hệ xác nhận gia hạn)
-- **Chủ động cảnh báo** khi câu hỏi liên quan: phòng trống >30 ngày, khách ≥2 lần trễ 12 tháng, HĐ ≤30 ngày, hóa đơn chưa tạo tháng hiện tại
-
-### FE — Sidebar gợi ý (Tab 2×2)
-
-Sidebar được thiết kế dạng lưới 2×2 tab category, mỗi tab hiện 2–3 gợi ý ngắn:
+### Sidebar gợi ý (2×2 tab)
 
 | Tab | Icon | Gợi ý |
 |---|---|---|
@@ -523,211 +482,177 @@ Sidebar được thiết kế dạng lưới 2×2 tab category, mỗi tab hiện
 | Cảnh báo | Bell | HĐ sắp hết hạn, hóa đơn chưa tạo, tổng tiền nợ |
 | Hành động | Wrench | Đánh dấu đã thu, chấm dứt hợp đồng |
 
-Bấm tab → đổi nhóm gợi ý; bấm gợi ý → gửi câu hỏi đầy đủ vào chat.
+---
 
-### Cấu hình AI
+## 12. Cron jobs & tự động hóa
 
-- `application-groq.properties`: profile `ai-groq` hoặc `ai-groq-mysql` — dùng Groq API kiểu OpenAI-compatible
-- Model hiện cấu hình: `llama-3.3-70b-versatile` (~30 000 TPM, đủ dùng production)
-- Retry tự động khi Groq trả 429: tối đa 3 lần, backoff 3s → 10s (cấu hình `spring.ai.retry.*`)
-- Nếu không có `ChatClient.Builder` (chạy thiếu AI profile), `AiServiceImpl` trả fallback message hướng dẫn chạy đúng profile
+| Cron | Thời gian | Class | Hành động |
+|---|---|---|---|
+| `0 5 0 * * *` | 00:05 Asia/HCM | `ContractServiceImpl#expireContractsDaily` | Contract ACTIVE có `endDate < today` → `EXPIRED`; room → `AVAILABLE` |
+| `0 10 0 * * *` | 00:10 Asia/HCM | `InvoiceServiceImpl#updateOverdueInvoicesDaily` | Invoice UNPAID có `dueDate < today` → `OVERDUE` |
+
+`@EnableScheduling` đặt trên `SmartrentApplication`. Timezone `Asia/Ho_Chi_Minh` khai báo rõ trong `@Scheduled`.
 
 ---
 
-## 8. Phân tích kỹ thuật tổng thể
+## 13. Soft delete — quy ước toàn hệ thống
 
-### Kiến trúc tổng quan
+### Entities có soft delete
 
-| | Frontend | Backend |
+| Entity | Cột DB | Default |
 |---|---|---|
-| Stack | React 18 + Vite + TypeScript | Spring Boot 3 + Java 17 |
-| State | TanStack Query (`staleTime: 30s`) + Zustand | JPA/Hibernate + Spring Security |
-| Auth | JWT lưu `localStorage`, interceptor tự inject | Stateless JWT filter, BCrypt password |
-| API | `axiosClient` base `http://localhost:8080/api/v1` | REST, `GlobalExceptionHandler` wrap lỗi |
+| `Property` | `is_deleted`, `deleted_at`, `deleted_by` | `false` |
+| `Room` | `is_deleted`, `deleted_at`, `deleted_by` | `false` |
+| `Contract` | `deleted`, `deleted_at`, `deleted_by` | `false` |
+| `Invoice` | `deleted`, `deleted_at`, `deleted_by` | `false` |
+| `Tenant` | `deleted`, `deleted_at`, `deleted_by` | `false` |
 
-### Các điểm kỹ thuật đáng chú ý
+### Repository convention
 
-#### Backend
+- Mọi query business đều dùng method có đuôi `AndDeletedFalse`.
+- Ví dụ: `findByIdAndDeletedFalse`, `existsByPhoneAndDeletedFalse`, `findByDeletedFalse`.
+- Query JPQL có `WHERE ... AND c.deleted = false` (hoặc `r.deleted = false`).
+- **Không bao giờ gọi `findAll()` hay `findById()` gốc cho business logic** — sẽ trả về cả bản ghi đã xóa.
 
-- **Soft delete** trên `Contract` và `Invoice`: mọi truy vấn business đều filter `deleted = false`.
-- **Cron job** `0 10 0 * * * (Asia/Ho_Chi_Minh)`: tự động chuyển UNPAID quá `dueDate` → OVERDUE mỗi ngày lúc 00:10.
-- **Entity chain**: `Invoice → Contract → Room → Property` và `Contract → Tenant` — mọi response trả về đã flatten (không expose quan hệ lồng nhau ra API).
-- `BaseEntity` dùng Spring Data Auditing (`@CreatedDate`, `@LastModifiedDate`).
-- `Payment` entity và `PaymentRepository` tồn tại nhưng chưa có `PaymentService` / controller đầy đủ — chỉ được dùng ở `ContractServiceImpl` để check lịch sử trước khi xóa HĐ.
+### Soft delete thực hiện
 
-#### Frontend
+```java
+entity.setDeleted(true);
+entity.setDeletedAt(LocalDateTime.now());
+entity.setDeletedBy(getCurrentUsername()); // từ SecurityContextHolder
+repository.save(entity);
+```
 
-- **Logic nghiệp vụ quan trọng đang nằm ở FE** (không có endpoint riêng):
-  - Dashboard: tính toàn bộ thống kê từ 3 API (property / invoice / contract).
-  - Search khách thuê: filter thuần client-side theo `fullName` + `phone`.
-  - Gợi ý chỉ số điện/nước: FE tự duyệt tập invoice đã tải để lấy tháng trước.
-- `PrivateRoute` chặn toàn bộ route theo `isAuthenticated` (Zustand) — không phân quyền theo role.
-- Interceptor `axiosClient`: `401` → xóa `localStorage` + redirect `/login`; các lỗi khác → toast.
+### DB migration cần thiết
 
-### Ghi nhận vấn đề & hạn chế hiện tại
+Khi deploy lần đầu (hoặc reset DB prod), cần chạy:
+```sql
+ALTER TABLE properties ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE properties ADD COLUMN deleted_at DATETIME NULL;
+ALTER TABLE properties ADD COLUMN deleted_by VARCHAR(100) NULL;
+
+ALTER TABLE rooms ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE rooms ADD COLUMN deleted_at DATETIME NULL;
+ALTER TABLE rooms ADD COLUMN deleted_by VARCHAR(100) NULL;
+```
+H2 (dev) tự tạo cột khi restart. MySQL/prod cần migration tay.
+
+---
+
+## 14. Business rules tổng hợp
+
+### Luồng trạng thái Room
+
+```
+AVAILABLE ──[tạo HĐ]──▶ OCCUPIED ──[terminate/expire HĐ]──▶ AVAILABLE
+AVAILABLE ──[admin]───▶ MAINTENANCE ──[admin]──────────────▶ AVAILABLE
+```
+
+### Luồng trạng thái Contract
+
+```
+ACTIVE ──[endDate < today, cron 00:05]──▶ EXPIRED
+ACTIVE ──[admin terminate, không còn nợ]──▶ TERMINATED
+```
+
+### Luồng trạng thái Invoice
+
+```
+UNPAID ──[dueDate < today, cron 00:10]──▶ OVERDUE
+UNPAID ──[mark-paid]──▶ PAID
+OVERDUE ──[mark-paid]──▶ PAID
+```
+
+### Ràng buộc xóa theo tầng
+
+```
+Property bị chặn xóa nếu:
+  ├── Có Room OCCUPIED
+  └── Có Invoice PAID bất kỳ
+
+Room bị chặn xóa nếu:
+  └── Có Invoice PAID bất kỳ
+
+Contract bị chặn xóa nếu:
+  ├── Đang ACTIVE
+  ├── Có invoice kỳ hiện tại
+  ├── Còn nợ (UNPAID/OVERDUE)
+  └── Đã có invoice PAID (lịch sử tài chính)
+
+Invoice bị chặn xóa nếu:
+  ├── Đã PAID
+  ├── notificationSent = true
+  └── Đang OVERDUE
+```
+
+---
+
+## 15. Vấn đề còn tồn tại
 
 | Vị trí | Vấn đề | Mức độ |
 |---|---|---|
 | `PropertyPage.tsx` | `ownerId: 1` hardcode, chưa lấy từ user đang đăng nhập | Trung bình |
-| `DashboardPage.tsx` | `paidThisMonth` lọc theo `PAID` chứ không lọc theo tháng hiện tại | Nhỏ |
-| `SecurityConfig.java` | Không có phân quyền theo role (ADMIN/USER), chỉ check `authenticated` | Trung bình |
-| `RoomServiceImpl` | Không check trùng `roomNumber` khi **update** phòng (chỉ check khi create) | Nhỏ |
-| CORS | Không cấu hình tường minh — có thể lỗi khi deploy khác domain | Trung bình |
-| `AiContextServiceImpl` | ~~Context đọc DB mỗi request~~ — **đã fix**: cache volatile 2 phút, tránh build lại khi gọi liên tiếp | Đã xử lý |
-| `ContractPage.tsx` | Gọi `roomApi.getById(roomId)` cho từng hợp đồng để lấy tên khu trọ — N+1 ở FE | Nhỏ |
-| `Payment` entity | Tồn tại nhưng chưa có luồng nghiệp vụ hoàn chỉnh | Không ảnh hưởng |
+| `SecurityConfig.java` | Không phân quyền theo role (ADMIN/USER), chỉ check `authenticated` | Trung bình |
+| `ContractPage.tsx` | Gọi `roomApi.getById(roomId)` cho từng HĐ để lấy tên khu trọ — N+1 ở FE | Nhỏ |
+| `Payment` entity | Tồn tại nhưng chưa có `PaymentService` / controller đầy đủ | Không ảnh hưởng |
+| DB migration | `is_deleted` trên Property/Room cần script SQL cho MySQL prod | Cần làm trước deploy |
+| CORS | Chỉ cấu hình trong `SecurityConfig`; `AppConfig` không còn bean CORS | Ổn với localhost |
 
 ---
 
-## 9. Lịch sử nâng cấp
+## 16. Lịch sử nâng cấp
 
-### Nâng cấp AI Assistant — 2026-05-22
+### 2026-05-22 — AI Assistant v1
 
-#### Vấn đề ban đầu
+- `AiContextServiceImpl` rewrite: 4 section → 13 section, tối ưu JOIN FETCH tránh N+1.
+- `AiChatPage.tsx`: sidebar list → tab 2×2 gợi ý.
 
-`AiContextServiceImpl` chỉ cung cấp 4 mảnh context nhỏ: hóa đơn UNPAID, phòng AVAILABLE, HĐ sắp hết hạn 30 ngày, thống kê đơn giản. AI không biết gì về khách thuê, toàn bộ phòng, hóa đơn OVERDUE, lịch sử doanh thu, hay hành vi thanh toán.
+### 2026-05-22 — AI Assistant v2
 
-#### Thay đổi Backend
+- Đổi model Groq: `openai/gpt-oss-20b` → `llama-3.3-70b-versatile` (fix 429 rate limit).
+- Thêm retry 3 lần backoff 3s→10s cho HTTP 429.
+- Thêm cache volatile 2 phút cho context (tránh đọc DB liên tiếp).
+- Tab "Tạo nhanh" → tab "Hành động" (đánh dấu đã thu, chấm dứt HĐ qua chat).
 
-**`RoomRepository.java`** — thêm:
-```java
-@Query("SELECT r FROM Room r JOIN FETCH r.property")
-List<Room> findAllWithProperty();
-```
+### 2026-05-22 — Hợp đồng numberOfPeople
 
-**`ContractRepository.java`** — thêm:
-```java
-@Query("""
-    SELECT c FROM Contract c
-    JOIN FETCH c.room r JOIN FETCH r.property p JOIN FETCH c.tenant t
-    WHERE c.deleted = false
-""")
-List<Contract> findAllNonDeletedWithDetails();
-```
+- `Contract` thêm field `numberOfPeople`.
+- `InvoiceServiceImpl`: `servicePeople` lấy từ `contract.numberOfPeople` thay vì từ request.
+- `InvoicePage.tsx`: xóa input "Số người", thay bằng read-only từ hợp đồng đã chọn.
 
-**`InvoiceRepository.java`** — thêm:
-```java
-@Query("""
-    SELECT i FROM Invoice i
-    JOIN FETCH i.contract c JOIN FETCH c.room r JOIN FETCH r.property p JOIN FETCH c.tenant t
-    WHERE i.deleted = false AND i.billingMonth >= :fromMonth
-""")
-List<Invoice> findAllNonDeletedSinceWithDetails(@Param("fromMonth") LocalDate fromMonth);
-```
+### 2026-06-01/02 — Business logic fixes & UI
 
-**`AiContextServiceImpl.java`** — rewrite hoàn toàn:
-- Thêm inject `TenantRepository`, `PropertyRepository`
-- Tăng từ 4 section → 13 section (xem bảng ở mục 7)
-- Dùng `ChronoUnit.DAYS.between()` thay `Period.getDays()` (fix bug tính ngày)
-- Thêm 5 analytics section mới: doanh thu 12 tháng, phân tích phòng trống, hành vi thanh toán, hóa đơn chưa tạo, hiệu suất khu trọ
+#### Backend fixes
 
-**`AiServiceImpl.java`** — nâng cấp system prompt:
-- Chuyển sang tiếng Việt đầy đủ dấu
-- Thêm hướng dẫn phân tích xu hướng, so sánh tháng/quý/năm
-- Thêm hướng dẫn đưa lời khuyên cụ thể theo từng tình huống
-- Thêm quy tắc chủ động cảnh báo khi phát hiện vấn đề
+1. **Duplicate CORS bean**: Xóa `corsConfigurationSource` khỏi `AppConfig.java` (giữ lại ở `SecurityConfig.java`). Fix `BeanDefinitionOverrideException` khi startup.
 
-#### Thay đổi Frontend
+2. **roomNumber duplicate check on update**: `RoomServiceImpl#update` thêm kiểm tra `existsByRoomNumberAndPropertyIdAndIdNotAndDeletedFalse`.
 
-**`AiChatPage.tsx`** — redesign sidebar gợi ý:
-- Thay list 10 button dài → tab 2×2 (Doanh thu / Phân tích / Cảnh báo / Tạo nhanh)
-- Mỗi tab chứa 2–3 gợi ý ngắn, bấm gửi câu hỏi đầy đủ
-- Thêm icons: `TrendingUp`, `BarChart2`, `Bell`, `Zap` từ lucide-react
-- Cập nhật welcome message phản ánh khả năng analytics mới
+3. **Soft delete cho Property & Room**: Thêm 3 field (`deleted`, `deletedAt`, `deletedBy`) vào cả hai entity. Cập nhật toàn bộ repository dùng `AndDeletedFalse`. Service `delete()` chuyển từ hard delete → soft delete với guard chặn xóa.
 
-### Nâng cấp AI Assistant (lần 2) — 2026-05-22
+4. **Contract EXPIRED tự động (Cron)**: Thêm `ContractServiceImpl#expireContractsDaily` (`@Scheduled 00:05`). Thêm `ContractRepository#findActiveContractsExpiredBefore`.
 
-#### Vấn đề
+5. **Chặn terminate khi còn nợ**: `ContractServiceImpl#terminate` check `sumOutstandingByContractId > 0` trước khi cho terminate.
 
-- Groq trả HTTP 429 (rate limit) khi dùng model `openai/gpt-oss-20b` (giới hạn 8 000 TPM). Mỗi request gửi ~4 500 token context, gần như chỉ xử lý được 1 request/phút.
-- Tab "Tạo nhanh" (tạo khách thuê / tạo phòng qua chat) bị xóa theo yêu cầu, cần thay bằng hành động thiết thực hơn.
+6. **Chặn update CCCD trùng**: `TenantServiceImpl#update` thêm kiểm tra CCCD uniqueness qua `findByIdCardNumberAndDeletedFalse`.
 
-#### Thay đổi Backend
+7. **Uniqueness check tenant không tính soft-deleted**: `create()` dùng `existsByPhoneAndDeletedFalse`, `existsByIdCardNumberAndDeletedFalse`.
 
-**`application-groq.properties`** — đổi model và thêm retry:
-```properties
-spring.ai.openai.chat.options.model=llama-3.3-70b-versatile
-spring.ai.openai.chat.options.temperature=0.3
+8. **billingMonth normalize**: `InvoiceServiceImpl#create` gọi `withDayOfMonth(1)` ngay đầu hàm.
 
-spring.ai.retry.max-attempts=3
-spring.ai.retry.backoff.initial-interval=3000
-spring.ai.retry.backoff.max-interval=10000
-spring.ai.retry.backoff.multiplier=2
-spring.ai.retry.on-http-codes=429
-```
+9. **Contract 6-month minimum on update**: `ContractServiceImpl#update` thêm check `endDate < startDate + 6 months`.
 
-**`AiContextServiceImpl.java`** — thêm cache volatile 2 phút:
-```java
-private static final long CACHE_TTL_MS = 120_000;
-private volatile String cachedContext = null;
-private volatile long   cachedAt      = 0;
-// buildContext() trả cache nếu chưa quá TTL, tránh đọc DB lặp lại
-```
+10. **Invoice ngoài khoảng hợp đồng**: `InvoiceServiceImpl#create` kiểm tra `billingMonth` trong `[startDate, endDate]` (đều normalize về ngày 1).
 
-**`AiServiceImpl.java`** — xóa toàn bộ `tryHandleQuickCreate`, thêm `tryHandleDirectAction`:
-- `handleMarkAsPaid`: nhận diện "đánh dấu đã thu / đã thanh toán", extract `#ID`, gọi `InvoiceService#markAsPaid` cho từng ID, trả kết quả thành công/thất bại từng hóa đơn
-- `handleTerminateContract`: nhận diện "chấm dứt hợp đồng / kết thúc hợp đồng", extract `#ID` đầu tiên, gọi `ContractService#terminate`, trả tóm tắt kết quả
+11. **Chặn xóa Property/Room có lịch sử tài chính**: `InvoiceRepository` thêm `existsPaidInvoiceByPropertyId`, `existsByContractRoomIdAndStatusAndDeletedFalse`. Service `delete()` dùng hai guard này.
 
-#### Thay đổi Frontend
+12. **Chặn xóa Contract có lịch sử thu tiền**: `ContractServiceImpl#getDeleteBlockedReason` thêm check `existsByContractIdAndStatusAndDeletedFalse(PAID)`.
 
-**`AiChatPage.tsx`** — thay tab "Tạo nhanh" (`Zap`) bằng tab "Hành động" (`Wrench`):
-- Xóa 2 item: "Thêm khách thuê mới", "Thêm phòng mới"
-- Thêm 2 item: "Đánh dấu đã thu" (gửi message mẫu + hướng dẫn nhập `#ID`), "Chấm dứt hợp đồng"
+#### Frontend fixes & UI
 
-### Nâng cấp Hợp đồng & Hóa đơn — 2026-05-22
-
-#### Vấn đề
-
-Khi tạo hóa đơn, admin phải tự nhập lại số người mỗi tháng vào ô "Dịch vụ chung" — thông tin này thực chất đã biết ngay từ lúc ký hợp đồng và không thay đổi theo tháng.
-
-#### Thay đổi Backend
-
-**`Contract.java`** — thêm field:
-```java
-@Column(name = "number_of_people")
-private Integer numberOfPeople;
-```
-
-**`ContractRequest.java`** — thêm field với validation:
-```java
-@Min(value = 1, message = "Số người trong phòng phải ít nhất là 1")
-private Integer numberOfPeople;
-```
-
-**`ContractResponse.java`** — thêm field `numberOfPeople` vào response.
-
-**`ContractServiceImpl.java`**:
-- `create()`: lưu `numberOfPeople` từ request vào entity
-- `toResponse()`: trả `numberOfPeople` về FE
-
-**`InvoiceRequest.java`** — xóa field `servicePeople` (không còn nhận từ FE).
-
-**`InvoiceServiceImpl.java`** — đổi nguồn lấy số người:
-```java
-// Trước: int servicePeople = request.getServicePeople() != null ? request.getServicePeople() : 0;
-int servicePeople = contract.getNumberOfPeople() != null ? contract.getNumberOfPeople() : 0;
-```
-
-> **DB migration:** Cần thêm column `ALTER TABLE contracts ADD COLUMN number_of_people INT NULL;`
-> Hợp đồng cũ có `number_of_people = NULL` → `servicePeople = 0` khi tạo hóa đơn (an toàn).
-
-#### Thay đổi Frontend
-
-**`types/index.ts`** — thêm `numberOfPeople?: number | null` vào interface `Contract`.
-
-**`contractApi.ts`** — thêm `numberOfPeople?: number` vào interface `ContractRequest`.
-
-**`invoiceApi.ts`** — xóa `servicePeople` khỏi interface `InvoiceRequest`.
-
-**`ContractPage.tsx`**:
-- Thêm field "Số người trong phòng" vào form tạo hợp đồng (validation `min: 1`)
-- Hiển thị số người trong modal xác nhận trước khi tạo
-- Schema zod thêm `numberOfPeople: z.coerce.number().min(1)`
-
-**`InvoicePage.tsx`**:
-- Xóa input "Số người" khỏi form tạo hóa đơn
-- Thay bằng ô read-only hiển thị số người lấy từ `selectedContract.numberOfPeople`
-- Preview phí dịch vụ tự tính: `contractNumberOfPeople × serviceUnitPrice`
-- Xóa `useEffect` từng set `servicePeople` từ hóa đơn tháng trước
-- Xóa `watchedServicePeople` khỏi `watch()`
-
+13. **Favicon**: Thay `favicon.svg` bằng logo chữ "SR" (white bold trên nền #2563eb, rx=10).
+14. **Tab title**: `index.html` → `<title>SmartRent</title>`.
+15. **Dashboard header**: Xóa 3 quick action buttons (Hóa đơn, Hợp đồng, Hỏi AI).
+16. **Dashboard greeting**: Thêm `Xin chào, <username>!` lấy từ `useAuthStore`.
+17. **Dashboard month badge**: "Tổng quan tháng X/YYYY" → styled pill với `<CalendarDays />` icon.
+18. **Recharts Cell deprecated**: Thay `<Cell>` bằng `shape` prop custom SVG renderer trên `<Bar>`.

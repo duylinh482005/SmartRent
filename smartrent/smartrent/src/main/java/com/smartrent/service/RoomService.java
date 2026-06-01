@@ -9,6 +9,7 @@ import java.util.List;
 public interface RoomService {
     RoomResponse create(RoomRequest request);
     RoomResponse getById(Long id);
+    List<RoomResponse> getAll();
     List<RoomResponse> getByProperty(Long propertyId);
     List<RoomResponse> getByPropertyAndStatus(Long propertyId, Room.Status status);
     RoomResponse update(Long id, RoomRequest request);

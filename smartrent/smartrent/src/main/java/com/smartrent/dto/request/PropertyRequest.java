@@ -20,8 +20,6 @@ public class PropertyRequest {
 
     private String description;
 
-    private Long ownerId;
-
     @DecimalMin(value = "0", message = "Đơn giá điện phải >= 0")
     private BigDecimal electricUnitPrice;
 

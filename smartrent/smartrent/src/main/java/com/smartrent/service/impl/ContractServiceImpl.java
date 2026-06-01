@@ -4,6 +4,7 @@ import com.smartrent.dto.request.ContractRequest;
 import com.smartrent.dto.request.ContractUpdateRequest;
 import com.smartrent.dto.response.ContractResponse;
 import com.smartrent.entity.Contract;
+import com.smartrent.entity.Invoice;
 import com.smartrent.entity.Room;
 import com.smartrent.entity.Tenant;
 import com.smartrent.repository.ContractRepository;
@@ -18,6 +19,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.scheduling.annotation.Scheduled;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.DecimalFormat;
@@ -25,6 +28,7 @@ import java.text.DecimalFormatSymbols;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -128,6 +132,13 @@ public class ContractServiceImpl implements ContractService {
             throw new RuntimeException("Hợp đồng không ở trạng thái ACTIVE, không thể chấm dứt");
         }
 
+        BigDecimal outstandingDebt = invoiceRepository.sumOutstandingByContractId(id);
+        if (outstandingDebt != null && outstandingDebt.compareTo(BigDecimal.ZERO) > 0) {
+            throw new RuntimeException(
+                    "Không thể chấm dứt: Khách thuê còn nợ " + formatCurrency(outstandingDebt)
+                    + " chưa thanh toán. Hãy thu tiền hoặc xử lý hóa đơn trước.");
+        }
+
         contract.setStatus(Contract.Status.TERMINATED);
 
         Room room = contract.getRoom();
@@ -148,6 +159,9 @@ public class ContractServiceImpl implements ContractService {
         if (request.getEndDate() != null) {
             if (!request.getEndDate().isAfter(contract.getStartDate())) {
                 throw new RuntimeException("Ngày kết thúc phải sau ngày bắt đầu hợp đồng (" + contract.getStartDate() + ")");
+            }
+            if (request.getEndDate().isBefore(contract.getStartDate().plusMonths(6))) {
+                throw new RuntimeException("Thời hạn hợp đồng tối thiểu là 6 tháng");
             }
             contract.setEndDate(request.getEndDate());
         }
@@ -197,17 +211,38 @@ public class ContractServiceImpl implements ContractService {
                 contract.getDeletedAt());
     }
 
+    @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Ho_Chi_Minh")
+    public void expireContractsDaily() {
+        LocalDate today = LocalDate.now();
+        List<Contract> expired = contractRepository.findActiveContractsExpiredBefore(today);
+
+        if (expired.isEmpty()) return;
+
+        List<Room> roomsToRelease = new ArrayList<>();
+        for (Contract contract : expired) {
+            contract.setStatus(Contract.Status.EXPIRED);
+            Room room = contract.getRoom();
+            if (room.getStatus() == Room.Status.OCCUPIED) {
+                room.setStatus(Room.Status.AVAILABLE);
+                roomsToRelease.add(room);
+            }
+            log.info("[CONTRACT_EXPIRED] contractId={} roomId={} endDate={}",
+                    contract.getId(), room.getId(), contract.getEndDate());
+        }
+
+        roomRepository.saveAll(roomsToRelease);
+        contractRepository.saveAll(expired);
+        log.info("[CONTRACT_EXPIRED] totalExpired={} runAt={}", expired.size(), LocalDateTime.now());
+    }
+
     private String getDeleteBlockedReason(Contract contract) {
         Long contractId = contract.getId();
         LocalDate today = LocalDate.now();
 
         boolean isTerminated = contract.getStatus() == Contract.Status.TERMINATED;
-        boolean isExpired = contract.getStatus() == Contract.Status.EXPIRED
-                || contract.getEndDate().isBefore(today);
+        boolean isExpired = contract.getStatus() == Contract.Status.EXPIRED;
         boolean isNotStartedYet = contract.getStartDate().isAfter(today);
-        boolean isInEffect = contract.getStatus() == Contract.Status.ACTIVE
-                && !isNotStartedYet
-                && !contract.getEndDate().isBefore(today);
+        boolean isInEffect = contract.getStatus() == Contract.Status.ACTIVE && !isNotStartedYet;
 
         if (isInEffect) {
             return ERR_ACTIVE;
@@ -225,8 +260,9 @@ public class ContractServiceImpl implements ContractService {
                     + " chưa thanh toán";
         }
 
-        // Soft delete giữ nguyên toàn bộ dữ liệu trong DB nên không cần chặn
-        // khi đã có hóa đơn PAID hoặc lịch sử thanh toán — dữ liệu vẫn tra cứu được.
+        if ((isExpired || isTerminated) && invoiceRepository.existsByContractIdAndStatusAndDeletedFalse(contractId, Invoice.Status.PAID)) {
+            return "Không thể xóa: Hợp đồng đã có lịch sử thu tiền, cần lưu trữ để đối soát tài chính";
+        }
 
         if (!isTerminated && !isExpired && !isNotStartedYet) {
             return ERR_STATUS_RULE;

@@ -5,14 +5,18 @@ import com.smartrent.dto.response.PropertyResponse;
 import com.smartrent.entity.Property;
 import com.smartrent.entity.User;
 import com.smartrent.entity.Room;
+import com.smartrent.repository.InvoiceRepository;
 import com.smartrent.repository.PropertyRepository;
 import com.smartrent.repository.RoomRepository;
 import com.smartrent.repository.UserRepository;
 import com.smartrent.service.PropertyService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -23,13 +27,13 @@ public class PropertyServiceImpl implements PropertyService {
     private final PropertyRepository propertyRepository;
     private final UserRepository userRepository;
     private final RoomRepository roomRepository;
+    private final InvoiceRepository invoiceRepository;
 
     @Override
     public PropertyResponse create(PropertyRequest request) {
-        User owner = userRepository.findById(request.getOwnerId())
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy user id: " + request.getOwnerId()));
+        User owner = getCurrentUser();
 
-        if (propertyRepository.existsByNameAndOwnerId(request.getName(), request.getOwnerId())) {
+        if (propertyRepository.existsByNameAndOwnerIdAndDeletedFalse(request.getName(), owner.getId())) {
             throw new RuntimeException("Khu trọ '" + request.getName() + "' đã tồn tại");
         }
 
@@ -50,14 +54,13 @@ public class PropertyServiceImpl implements PropertyService {
     @Override
     @Transactional(readOnly = true)
     public PropertyResponse getById(Long id) {
-        Property property = findById(id);
-        return toResponse(property);
+        return toResponse(findById(id));
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<PropertyResponse> getAll() {
-        return propertyRepository.findAll().stream()
+        return propertyRepository.findByDeletedFalse().stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -65,7 +68,7 @@ public class PropertyServiceImpl implements PropertyService {
     @Override
     @Transactional(readOnly = true)
     public List<PropertyResponse> getByOwner(Long ownerId) {
-        return propertyRepository.findByOwnerId(ownerId).stream()
+        return propertyRepository.findByOwnerIdAndDeletedFalse(ownerId).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -74,7 +77,7 @@ public class PropertyServiceImpl implements PropertyService {
     public PropertyResponse update(Long id, PropertyRequest request) {
         Property property = findById(id);
 
-        if (propertyRepository.existsByNameAndOwnerIdAndIdNot(
+        if (propertyRepository.existsByNameAndOwnerIdAndIdNotAndDeletedFalse(
                 request.getName(), property.getOwner().getId(), property.getId())) {
             throw new RuntimeException("Khu trọ '" + request.getName() + "' đã tồn tại");
         }
@@ -92,15 +95,39 @@ public class PropertyServiceImpl implements PropertyService {
     @Override
     public void delete(Long id) {
         Property property = findById(id);
-        if (roomRepository.existsByPropertyIdAndStatus(property.getId(), Room.Status.OCCUPIED)) {
+
+        if (roomRepository.existsByPropertyIdAndStatusAndDeletedFalse(property.getId(), Room.Status.OCCUPIED)) {
             throw new RuntimeException("Không thể xóa khu trọ đang có phòng được thuê. Hãy chấm dứt các hợp đồng trước.");
         }
-        propertyRepository.delete(property);
+
+        if (invoiceRepository.existsPaidInvoiceByPropertyId(property.getId())) {
+            throw new RuntimeException("Không thể xóa: Khu trọ đã có lịch sử thu tiền, cần lưu trữ để đối soát tài chính");
+        }
+
+        String deletedBy = getCurrentUsername();
+        property.setDeleted(true);
+        property.setDeletedAt(LocalDateTime.now());
+        property.setDeletedBy(deletedBy);
+        propertyRepository.save(property);
     }
 
     private Property findById(Long id) {
-        return propertyRepository.findById(id)
+        return propertyRepository.findByIdAndDeletedFalse(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy khu trọ id: " + id));
+    }
+
+    private User getCurrentUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return userRepository.findByUsername(authentication.getName())
+                .orElseThrow(() -> new RuntimeException("Không xác định được người dùng hiện tại"));
+    }
+
+    private String getCurrentUsername() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) return "system";
+        String username = authentication.getName();
+        if (username == null || username.isBlank() || "anonymousUser".equalsIgnoreCase(username)) return "system";
+        return username;
     }
 
     private PropertyResponse toResponse(Property p) {
@@ -111,7 +138,7 @@ public class PropertyServiceImpl implements PropertyService {
                 .description(p.getDescription())
                 .ownerId(p.getOwner().getId())
                 .ownerUsername(p.getOwner().getUsername())
-                .totalRooms(p.getRooms().size())
+                .totalRooms((int) p.getRooms().stream().filter(r -> !r.isDeleted()).count())
                 .electricUnitPrice(p.getElectricUnitPrice())
                 .waterUnitPrice(p.getWaterUnitPrice())
                 .serviceUnitPrice(p.getServiceUnitPrice())

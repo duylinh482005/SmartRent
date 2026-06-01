@@ -13,6 +13,7 @@ public interface TenantRepository extends JpaRepository<Tenant, Long> {
     Optional<Tenant> findByIdAndDeletedFalse(Long id);
     Optional<Tenant> findByPhone(String phone);
     Optional<Tenant> findByPhoneAndDeletedFalse(String phone);
-    boolean existsByPhone(String phone);
-    boolean existsByIdCardNumber(String idCardNumber);
+    boolean existsByPhoneAndDeletedFalse(String phone);
+    boolean existsByIdCardNumberAndDeletedFalse(String idCardNumber);
+    Optional<Tenant> findByIdCardNumberAndDeletedFalse(String idCardNumber);
 }
