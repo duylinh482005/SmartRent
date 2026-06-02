@@ -30,7 +30,7 @@ public class RoomServiceImpl implements RoomService {
 
     @Override
     public RoomResponse create(RoomRequest request) {
-        Property property = propertyRepository.findById(request.getPropertyId())
+        Property property = propertyRepository.findByIdAndDeletedFalse(request.getPropertyId())
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy khu trọ id: " + request.getPropertyId()));
 
         if (roomRepository.existsByRoomNumberAndPropertyIdAndDeletedFalse(request.getRoomNumber(), request.getPropertyId())) {

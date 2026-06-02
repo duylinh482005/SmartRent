@@ -60,7 +60,8 @@ public class PropertyServiceImpl implements PropertyService {
     @Override
     @Transactional(readOnly = true)
     public List<PropertyResponse> getAll() {
-        return propertyRepository.findByDeletedFalse().stream()
+        User owner = getCurrentUser();
+        return propertyRepository.findByOwnerIdAndDeletedFalse(owner.getId()).stream()
                 .map(this::toResponse)
                 .toList();
     }

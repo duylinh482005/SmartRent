@@ -63,7 +63,7 @@ public class ContractServiceImpl implements ContractService {
             throw new RuntimeException("Thời hạn hợp đồng tối thiểu là 6 tháng");
         }
 
-        Room room = roomRepository.findById(request.getRoomId())
+        Room room = roomRepository.findByIdAndDeletedFalse(request.getRoomId())
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phòng id: " + request.getRoomId()));
 
         if (room.getStatus() != Room.Status.AVAILABLE) {
@@ -75,8 +75,12 @@ public class ContractServiceImpl implements ContractService {
                     throw new RuntimeException("Phòng này đã có hợp đồng đang hiệu lực (id: " + c.getId() + ")");
                 });
 
-        Tenant tenant = tenantRepository.findById(request.getTenantId())
+        Tenant tenant = tenantRepository.findByIdAndDeletedFalse(request.getTenantId())
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy khách thuê id: " + request.getTenantId()));
+
+        if (request.getNumberOfPeople() == null || request.getNumberOfPeople() < 1) {
+            throw new RuntimeException("Số người thuê phải ít nhất là 1");
+        }
 
         Contract contract = Contract.builder()
                 .room(room)
@@ -154,6 +158,9 @@ public class ContractServiceImpl implements ContractService {
 
         if (contract.getStatus() == Contract.Status.TERMINATED) {
             throw new RuntimeException("Không thể sửa hợp đồng đã chấm dứt");
+        }
+        if (contract.getStatus() == Contract.Status.EXPIRED) {
+            throw new RuntimeException("Không thể sửa hợp đồng đã hết hạn");
         }
 
         if (request.getEndDate() != null) {

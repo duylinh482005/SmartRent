@@ -47,55 +47,61 @@ public class AiContextServiceImpl implements AiContextService {
         if (cachedContext != null && (now - cachedAt) < CACHE_TTL_MS) {
             return cachedContext;
         }
-        LocalDate today = LocalDate.now();
+        synchronized (this) {
+            now = System.currentTimeMillis();
+            if (cachedContext != null && (now - cachedAt) < CACHE_TTL_MS) {
+                return cachedContext;
+            }
+            LocalDate today = LocalDate.now();
 
-        // Load core data (efficient with JOIN FETCH to avoid N+1)
-        List<Room>     allRooms      = roomRepository.findAllWithProperty();
-        List<Property> allProperties = propertyRepository.findAll();
-        List<Tenant>   allTenants    = tenantRepository.findAll();
-        List<Contract> allContracts  = contractRepository.findAllNonDeletedWithDetails();
-        List<Invoice>  unpaid        = invoiceRepository.findAllByStatusWithDetails(Invoice.Status.UNPAID);
-        List<Invoice>  overdue       = invoiceRepository.findAllByStatusWithDetails(Invoice.Status.OVERDUE);
+            // Load core data (efficient with JOIN FETCH to avoid N+1)
+            List<Room>     allRooms      = roomRepository.findAllWithProperty();
+            List<Property> allProperties = propertyRepository.findByDeletedFalse();
+            List<Tenant>   allTenants    = tenantRepository.findByDeletedFalse();
+            List<Contract> allContracts  = contractRepository.findAllNonDeletedWithDetails();
+            List<Invoice>  unpaid        = invoiceRepository.findAllByStatusWithDetails(Invoice.Status.UNPAID);
+            List<Invoice>  overdue       = invoiceRepository.findAllByStatusWithDetails(Invoice.Status.OVERDUE);
 
-        // Historical invoices for trend analysis (13 months window)
-        LocalDate historyFrom = YearMonth.now().minusMonths(12).atDay(1);
-        List<Invoice> allInvoices = invoiceRepository.findAllNonDeletedSinceWithDetails(historyFrom);
+            // Historical invoices for trend analysis (13 months window)
+            LocalDate historyFrom = YearMonth.now().minusMonths(12).atDay(1);
+            List<Invoice> allInvoices = invoiceRepository.findAllNonDeletedSinceWithDetails(historyFrom);
 
-        // Lookup maps
-        Map<Long, List<Room>> roomsByPropertyId = allRooms.stream()
-                .collect(Collectors.groupingBy(r -> r.getProperty().getId()));
+            // Lookup maps
+            Map<Long, List<Room>> roomsByPropertyId = allRooms.stream()
+                    .collect(Collectors.groupingBy(r -> r.getProperty().getId()));
 
-        Map<Long, Contract> activeByRoomId = allContracts.stream()
-                .filter(c -> c.getStatus() == Contract.Status.ACTIVE)
-                .collect(Collectors.toMap(c -> c.getRoom().getId(), c -> c, (a, b) -> a));
+            Map<Long, Contract> activeByRoomId = allContracts.stream()
+                    .filter(c -> c.getStatus() == Contract.Status.ACTIVE)
+                    .collect(Collectors.toMap(c -> c.getRoom().getId(), c -> c, (a, b) -> a));
 
-        Map<Long, Contract> activeByTenantId = allContracts.stream()
-                .filter(c -> c.getStatus() == Contract.Status.ACTIVE)
-                .collect(Collectors.toMap(c -> c.getTenant().getId(), c -> c, (a, b) -> a));
+            Map<Long, Contract> activeByTenantId = allContracts.stream()
+                    .filter(c -> c.getStatus() == Contract.Status.ACTIVE)
+                    .collect(Collectors.toMap(c -> c.getTenant().getId(), c -> c, (a, b) -> a));
 
-        StringBuilder ctx = new StringBuilder();
-        ctx.append("=== DỮ LIỆU HỆ THỐNG QUẢN LÝ PHÒNG TRỌ ===\n");
-        ctx.append("Ngày hôm nay: ").append(today.format(DATE_FMT)).append("\n\n");
+            StringBuilder ctx = new StringBuilder();
+            ctx.append("=== DỮ LIỆU HỆ THỐNG QUẢN LÝ PHÒNG TRỌ ===\n");
+            ctx.append("Ngày hôm nay: ").append(today.format(DATE_FMT)).append("\n\n");
 
-        appendPropertySection(ctx, allProperties, roomsByPropertyId);
-        appendRoomSection(ctx, allRooms, activeByRoomId);
-        appendTenantSection(ctx, allTenants, activeByTenantId);
-        appendContractSection(ctx, allContracts, today);
-        appendInvoiceSection(ctx, unpaid, overdue, today);
+            appendPropertySection(ctx, allProperties, roomsByPropertyId);
+            appendRoomSection(ctx, allRooms, activeByRoomId);
+            appendTenantSection(ctx, allTenants, activeByTenantId);
+            appendContractSection(ctx, allContracts, today);
+            appendInvoiceSection(ctx, unpaid, overdue, today);
 
-        // Analytics sections
-        appendRevenueHistorySection(ctx, allInvoices);
-        appendVacantRoomSection(ctx, allRooms, allContracts, today);
-        appendPaymentBehaviorSection(ctx, allInvoices, overdue, today);
-        appendMissingInvoicesSection(ctx, allContracts, allInvoices);
-        appendPropertyPerformanceSection(ctx, allProperties, roomsByPropertyId, allInvoices, overdue);
+            // Analytics sections
+            appendRevenueHistorySection(ctx, allInvoices);
+            appendVacantRoomSection(ctx, allRooms, allContracts, today);
+            appendPaymentBehaviorSection(ctx, allInvoices, overdue, today);
+            appendMissingInvoicesSection(ctx, allContracts, allInvoices);
+            appendPropertyPerformanceSection(ctx, allProperties, roomsByPropertyId, allInvoices, overdue);
 
-        appendStatSection(ctx, allRooms, allContracts, unpaid, overdue, allInvoices, today);
+            appendStatSection(ctx, allRooms, allContracts, unpaid, overdue, allInvoices, today);
 
-        String result = ctx.toString();
-        cachedContext = result;
-        cachedAt      = System.currentTimeMillis();
-        return result;
+            String result = ctx.toString();
+            cachedContext = result;
+            cachedAt      = System.currentTimeMillis();
+            return result;
+        }
     }
 
     // ── Core sections ──────────────────────────────────────────────────────────
@@ -317,10 +323,14 @@ public class AiContextServiceImpl implements AiContextService {
             String label = vi.hadContract()
                     ? "HĐ cuối kết thúc " + vi.since().format(DATE_FMT)
                     : "Chưa từng có HĐ (từ " + vi.since().format(DATE_FMT) + ")";
-            String urgency = vi.days() >= 90 ? " [TRONG THOI GIAN QUA DAI - CAN XU LY]"
-                           : vi.days() >= 60 ? " [TRONG LAU - CAN CHU Y]"
-                           : vi.days() >= 30 ? " [DA TRONG 1 THANG]"
-                           : "";
+            // Chỉ cảnh báo urgency với phòng đã từng có HĐ để tránh false alarm
+            // với phòng mới thêm vào hệ thống nhưng chủ chưa sẵn sàng cho thuê
+            String urgency = vi.hadContract()
+                    ? (vi.days() >= 90 ? " [TRONG THOI GIAN QUA DAI - CAN XU LY]"
+                     : vi.days() >= 60 ? " [TRONG LAU - CAN CHU Y]"
+                     : vi.days() >= 30 ? " [DA TRONG 1 THANG]"
+                     : "")
+                    : "";
             lostMonthlyPotential = lostMonthlyPotential.add(vi.room().getPrice());
             ctx.append(String.format(
                     "• Phòng %s - %s | Giá: %,.0f đ/tháng | Trống: %d ngày (%s)%s\n",

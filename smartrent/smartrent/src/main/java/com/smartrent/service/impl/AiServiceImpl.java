@@ -23,6 +23,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -46,6 +48,8 @@ public class AiServiceImpl implements AiService {
 
     private static final Pattern ID_PATTERN     = Pattern.compile("#(\\d+)");
     private static final Pattern MONTHS_PATTERN = Pattern.compile("(\\d+)\\s*tháng");
+    private static final Pattern RENT_PATTERN   = Pattern.compile("(?:tiền thuê|giá thuê)\\s+([\\d.,]+)");
+    private static final Pattern PEOPLE_PATTERN = Pattern.compile("số người\\s+(\\d+)");
     private static final DateTimeFormatter DATE_FMT  = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("MM/yyyy");
     private static final int MAX_HISTORY = 10;
@@ -85,18 +89,23 @@ public class AiServiceImpl implements AiService {
             - Hợp đồng còn ≤30 ngày mà chưa có tín hiệu gia hạn.
             - Hóa đơn chưa tạo cho tháng hiện tại.
 
-            HÀNH ĐỘNG TRỰC TIẾP (hướng dẫn người dùng dùng #ID khi cần):
+            HÀNH ĐỘNG TRỰC TIẾP (hệ thống tự tra ID từ ngữ cảnh nếu bạn không cung cấp #ID):
             - Đánh dấu đã thu: "Đánh dấu đã thanh toán hóa đơn #5 #8"
             - Chấm dứt hợp đồng: "Chấm dứt hợp đồng #3"
-            - Sửa hợp đồng (gia hạn ngày kết thúc): "Sửa hợp đồng #3 thêm 6 tháng"
-            - Chuyển phòng bảo trì: "Đặt phòng #7 vào bảo trì" (chỉ khi phòng đang trống, không có khách)
-            - Mở lại phòng: "Phòng #7 sửa xong" (chỉ khi phòng không có khách)
+              → Nếu vừa hỏi về hợp đồng cụ thể: "Chấm dứt hợp đồng đó" (hệ thống tự lấy ID)
+            - Sửa hợp đồng (có thể kết hợp nhiều thay đổi trong một lệnh):
+              + "Gia hạn thêm 6 tháng" (tự lấy ID từ ngữ cảnh cuộc hội thoại)
+              + "Sửa hợp đồng #3 tiền thuê 3500000"
+              + "Sửa hợp đồng #3 số người 2"
+              + Kết hợp: "Sửa hợp đồng #3 thêm 6 tháng tiền thuê 4000000 số người 3"
+            - Chuyển phòng bảo trì: "Đặt phòng #7 vào bảo trì"
+            - Mở lại phòng: "Phòng #7 sửa xong"
             - Lưu ý: KHÔNG thể đổi trạng thái phòng đang có khách thuê. Phải chấm dứt hợp đồng trước.
             """;
 
     @Override
     public AiChatResponse chat(String message, List<AiChatRequest.ChatHistoryItem> history) {
-        Optional<String> directResponse = tryHandleDirectAction(message);
+        Optional<String> directResponse = tryHandleDirectAction(message, history);
         if (directResponse.isPresent()) {
             return AiChatResponse.builder()
                     .question(message)
@@ -126,7 +135,6 @@ public class AiServiceImpl implements AiService {
 
         List<Message> historyMessages = buildHistoryMessages(history);
 
-        // Explicit message ordering for reliable multi-turn conversations
         List<Message> allMessages = new ArrayList<>();
         allMessages.add(new SystemMessage(SYSTEM_PROMPT));
         allMessages.addAll(historyMessages);
@@ -165,34 +173,49 @@ public class AiServiceImpl implements AiService {
 
     // ── Direct action dispatcher ──────────────────────────────────────────────
 
-    private Optional<String> tryHandleDirectAction(String message) {
+    private Optional<String> tryHandleDirectAction(String message, List<AiChatRequest.ChatHistoryItem> history) {
         String normalized = message.toLowerCase();
 
+        // Always intercept — intent is unambiguous even without ID
         if (normalized.contains("xác nhận thanh toán") || normalized.contains("đánh dấu thanh toán")
                 || normalized.contains("đánh dấu đã thu") || normalized.contains("đánh dấu đã thanh toán")) {
-            return Optional.of(handleMarkAsPaid(message));
+            return Optional.of(handleMarkAsPaid(resolveIds(message, history)));
         }
         if (normalized.contains("chấm dứt hợp đồng") || normalized.contains("kết thúc hợp đồng")) {
-            return Optional.of(handleTerminateContract(message));
+            return Optional.of(handleTerminateContract(resolveIds(message, history)));
         }
-        if (normalized.contains("sửa hợp đồng") && !extractIds(message).isEmpty()) {
-            return Optional.of(handleEditContract(message));
+
+        // Edit contract: only intercept when an ID is available (message or history)
+        // to avoid capturing general questions like "làm thế nào để gia hạn hợp đồng?"
+        boolean editIntent = normalized.contains("sửa hợp đồng")
+                || (normalized.contains("gia hạn") && MONTHS_PATTERN.matcher(normalized).find());
+        if (editIntent) {
+            List<Long> ids = resolveIds(message, history);
+            if (!ids.isEmpty()) {
+                return Optional.of(handleEditContract(message, ids));
+            }
         }
-        if (normalized.contains("bảo trì") && normalized.contains("phòng")
-                && !extractIds(message).isEmpty()) {
-            return Optional.of(handleRoomStatus(message, Room.Status.MAINTENANCE));
+
+        // Room status: only intercept when an ID is available
+        if (normalized.contains("bảo trì") && normalized.contains("phòng")) {
+            List<Long> ids = resolveIds(message, history);
+            if (!ids.isEmpty()) {
+                return Optional.of(handleRoomStatus(ids, Room.Status.MAINTENANCE));
+            }
         }
-        if ((normalized.contains("sửa xong") || normalized.contains("mở lại phòng"))
-                && !extractIds(message).isEmpty()) {
-            return Optional.of(handleRoomStatus(message, Room.Status.AVAILABLE));
+        if (normalized.contains("sửa xong") || normalized.contains("mở lại phòng")) {
+            List<Long> ids = resolveIds(message, history);
+            if (!ids.isEmpty()) {
+                return Optional.of(handleRoomStatus(ids, Room.Status.AVAILABLE));
+            }
         }
+
         return Optional.empty();
     }
 
     // ── Action: mark invoices as paid ─────────────────────────────────────────
 
-    private String handleMarkAsPaid(String message) {
-        List<Long> ids = extractIds(message);
+    private String handleMarkAsPaid(List<Long> ids) {
         if (ids.isEmpty()) {
             return "Vui lòng cung cấp ID hóa đơn theo định dạng #số. Ví dụ:\nĐánh dấu đã thanh toán hóa đơn #5 #8 #12";
         }
@@ -225,10 +248,14 @@ public class AiServiceImpl implements AiService {
 
     // ── Action: terminate contract ────────────────────────────────────────────
 
-    private String handleTerminateContract(String message) {
-        List<Long> ids = extractIds(message);
+    private String handleTerminateContract(List<Long> ids) {
         if (ids.isEmpty()) {
             return "Vui lòng cung cấp ID hợp đồng theo định dạng #số. Ví dụ:\nChấm dứt hợp đồng #3";
+        }
+        if (ids.size() > 1) {
+            String idList = ids.stream().map(i -> "#" + i).collect(Collectors.joining(", "));
+            return "Tìm thấy nhiều hợp đồng trong cuộc trò chuyện vừa rồi: " + idList
+                    + "\nBạn muốn chấm dứt hợp đồng nào? Vui lòng gửi lại lệnh kèm #ID cụ thể.";
         }
 
         Long id = ids.get(0);
@@ -242,33 +269,68 @@ public class AiServiceImpl implements AiService {
         }
     }
 
-    // ── Action: edit contract (extend end date) ───────────────────────────────
+    // ── Action: edit contract (extend months / change rent / change people) ───
 
-    private String handleEditContract(String message) {
-        List<Long> ids = extractIds(message);
+    private String handleEditContract(String message, List<Long> ids) {
         if (ids.isEmpty()) {
-            return "Vui lòng cung cấp ID hợp đồng theo định dạng #số. Ví dụ:\nSửa hợp đồng #3 thêm 6 tháng";
+            return "Vui lòng cung cấp ID hợp đồng theo định dạng #số. Ví dụ:\n" +
+                   "Sửa hợp đồng #3 thêm 6 tháng\n" +
+                   "Sửa hợp đồng #3 tiền thuê 3500000\n" +
+                   "Sửa hợp đồng #3 số người 2";
+        }
+        if (ids.size() > 1) {
+            String idList = ids.stream().map(i -> "#" + i).collect(Collectors.joining(", "));
+            return "Tìm thấy nhiều hợp đồng trong cuộc trò chuyện vừa rồi: " + idList
+                    + "\nBạn muốn sửa hợp đồng nào? Vui lòng gửi lại lệnh kèm #ID cụ thể, ví dụ:\n"
+                    + "Sửa hợp đồng #" + ids.get(0) + " thêm 6 tháng";
         }
 
         Long id = ids.get(0);
+        String lower = message.toLowerCase();
 
-        Matcher monthMatcher = MONTHS_PATTERN.matcher(message.toLowerCase());
-        if (!monthMatcher.find()) {
-            return "Vui lòng chỉ định số tháng muốn gia hạn. Ví dụ:\nSửa hợp đồng #" + id + " thêm 6 tháng";
+        ContractUpdateRequest.ContractUpdateRequestBuilder reqBuilder = ContractUpdateRequest.builder();
+        List<String> changes = new ArrayList<>();
+
+        Matcher monthMatcher = MONTHS_PATTERN.matcher(lower);
+        if (monthMatcher.find()) {
+            int months = Integer.parseInt(monthMatcher.group(1));
+            try {
+                ContractResponse current = contractService.getById(id);
+                LocalDate newEndDate = current.getEndDate().plusMonths(months);
+                reqBuilder.endDate(newEndDate);
+                changes.add(String.format("gia hạn +%d tháng → hết hạn %s", months, newEndDate.format(DATE_FMT)));
+            } catch (RuntimeException ex) {
+                return "Không thể đọc hợp đồng #" + id + ": " + ex.getMessage();
+            }
         }
 
-        int months = Integer.parseInt(monthMatcher.group(1));
+        Matcher rentMatcher = RENT_PATTERN.matcher(lower);
+        if (rentMatcher.find()) {
+            String rawNumber = rentMatcher.group(1).replaceAll("[.,]", "");
+            BigDecimal rent = new BigDecimal(rawNumber);
+            reqBuilder.monthlyRent(rent);
+            changes.add(String.format("tiền thuê → %,.0f đ/tháng", rent));
+        }
+
+        Matcher peopleMatcher = PEOPLE_PATTERN.matcher(lower);
+        if (peopleMatcher.find()) {
+            int people = Integer.parseInt(peopleMatcher.group(1));
+            reqBuilder.numberOfPeople(people);
+            changes.add("số người → " + people);
+        }
+
+        if (changes.isEmpty()) {
+            return "Vui lòng chỉ định nội dung muốn sửa:\n" +
+                   "- Gia hạn: Sửa hợp đồng #" + id + " thêm 6 tháng\n" +
+                   "- Giá thuê: Sửa hợp đồng #" + id + " tiền thuê 3500000\n" +
+                   "- Số người: Sửa hợp đồng #" + id + " số người 2";
+        }
+
         try {
-            ContractResponse current = contractService.getById(id);
-            LocalDate newEndDate = current.getEndDate().plusMonths(months);
-            ContractUpdateRequest updateReq = ContractUpdateRequest.builder()
-                    .endDate(newEndDate)
-                    .build();
-            ContractResponse updated = contractService.update(id, updateReq);
-            return String.format(
-                    "Đã cập nhật hợp đồng #%d thêm %d tháng.\nPhòng %s (%s) — Khách: %s\nNgày hết hạn mới: %s",
-                    id, months, updated.getRoomNumber(), updated.getPropertyName(),
-                    updated.getTenantName(), newEndDate.format(DATE_FMT));
+            ContractResponse updated = contractService.update(id, reqBuilder.build());
+            return String.format("Đã cập nhật hợp đồng #%d: %s\nPhòng %s (%s) — Khách: %s",
+                    id, String.join(", ", changes),
+                    updated.getRoomNumber(), updated.getPropertyName(), updated.getTenantName());
         } catch (RuntimeException ex) {
             return "Không thể cập nhật hợp đồng #" + id + ": " + ex.getMessage();
         }
@@ -276,8 +338,7 @@ public class AiServiceImpl implements AiService {
 
     // ── Action: change room status ────────────────────────────────────────────
 
-    private String handleRoomStatus(String message, Room.Status targetStatus) {
-        List<Long> ids = extractIds(message);
+    private String handleRoomStatus(List<Long> ids, Room.Status targetStatus) {
         if (ids.isEmpty()) {
             String example = targetStatus == Room.Status.MAINTENANCE
                     ? "Đặt phòng #7 vào bảo trì" : "Phòng #7 sửa xong";
@@ -313,6 +374,27 @@ public class AiServiceImpl implements AiService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Returns IDs from the current message first; falls back to the most recent
+     * assistant message in history that contains at least one #ID.
+     */
+    private List<Long> resolveIds(String message, List<AiChatRequest.ChatHistoryItem> history) {
+        List<Long> fromMessage = extractIds(message);
+        if (!fromMessage.isEmpty()) return fromMessage;
+        return extractIdsFromLastAssistantMessage(history);
+    }
+
+    private List<Long> extractIdsFromLastAssistantMessage(List<AiChatRequest.ChatHistoryItem> history) {
+        if (history == null || history.isEmpty()) return List.of();
+        for (int i = history.size() - 1; i >= 0; i--) {
+            if ("assistant".equals(history.get(i).getRole())) {
+                List<Long> ids = extractIds(history.get(i).getContent());
+                if (!ids.isEmpty()) return ids;
+            }
+        }
+        return List.of();
+    }
 
     private List<Long> extractIds(String message) {
         List<Long> ids = new ArrayList<>();

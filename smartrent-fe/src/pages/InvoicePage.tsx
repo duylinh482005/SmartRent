@@ -488,11 +488,6 @@ export default function InvoicePage() {
     },
   });
 
-  const openCreateModal = () => {
-    resetCreateInvoiceForm();
-    setModalOpen(true);
-  };
-
   const openCreateFromPending = (contract: Contract) => {
     reset({
       contractId: 0,
@@ -870,17 +865,10 @@ export default function InvoicePage() {
             </div>
           ) : (
             <>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800">
                   {pendingContracts.length} phòng chưa lập hóa đơn
                 </span>
-                <button
-                  type="button"
-                  onClick={() => { setPendingRoomsOpen(false); openCreateModal(); }}
-                  className="text-xs text-gray-400 underline hover:text-gray-600 transition"
-                >
-                  Tạo thủ công (tháng khác)
-                </button>
               </div>
               <div className="overflow-hidden rounded-xl border border-gray-100">
                 <table className="w-full text-sm">

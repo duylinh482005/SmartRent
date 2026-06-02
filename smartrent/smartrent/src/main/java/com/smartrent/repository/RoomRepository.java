@@ -17,6 +17,6 @@ public interface RoomRepository extends JpaRepository<Room, Long> {
     boolean existsByRoomNumberAndPropertyIdAndIdNotAndDeletedFalse(String roomNumber, Long propertyId, Long id);
     boolean existsByPropertyIdAndStatusAndDeletedFalse(Long propertyId, Room.Status status);
 
-    @Query("SELECT r FROM Room r JOIN FETCH r.property WHERE r.deleted = false")
+    @Query("SELECT r FROM Room r JOIN FETCH r.property p WHERE r.deleted = false AND p.deleted = false")
     List<Room> findAllWithProperty();
 }
