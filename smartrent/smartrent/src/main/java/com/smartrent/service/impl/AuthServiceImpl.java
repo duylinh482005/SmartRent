@@ -3,6 +3,7 @@ package com.smartrent.service.impl;
 import com.smartrent.dto.request.ChangePasswordRequest;
 import com.smartrent.dto.request.LoginRequest;
 import com.smartrent.dto.request.RegisterRequest;
+import com.smartrent.dto.request.UpdatePaymentInfoRequest;
 import com.smartrent.dto.response.AuthResponse;
 import com.smartrent.dto.response.UserProfileResponse;
 import com.smartrent.entity.User;
@@ -91,6 +92,10 @@ public class AuthServiceImpl implements AuthService {
                 .role(user.getRole().name())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
+                .bankName(user.getBankName())
+                .bankAccountNumber(user.getBankAccountNumber())
+                .bankAccountName(user.getBankAccountName())
+                .qrCodeUrl(user.getQrCodeUrl())
                 .build();
     }
 
@@ -108,6 +113,17 @@ public class AuthServiceImpl implements AuthService {
 
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
+    }
+
+    @Override
+    public UserProfileResponse updatePaymentInfo(UpdatePaymentInfoRequest request) {
+        User user = getCurrentUser();
+        user.setBankName(request.getBankName());
+        user.setBankAccountNumber(request.getBankAccountNumber());
+        user.setBankAccountName(request.getBankAccountName());
+        user.setQrCodeUrl(request.getQrCodeUrl());
+        userRepository.save(user);
+        return getCurrentUserProfile();
     }
 
     private User getCurrentUser() {

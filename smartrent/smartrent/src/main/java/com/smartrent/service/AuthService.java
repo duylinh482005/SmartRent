@@ -1,8 +1,9 @@
 package com.smartrent.service;
 
+import com.smartrent.dto.request.ChangePasswordRequest;
 import com.smartrent.dto.request.LoginRequest;
 import com.smartrent.dto.request.RegisterRequest;
-import com.smartrent.dto.request.ChangePasswordRequest;
+import com.smartrent.dto.request.UpdatePaymentInfoRequest;
 import com.smartrent.dto.response.AuthResponse;
 import com.smartrent.dto.response.UserProfileResponse;
 
@@ -11,4 +12,5 @@ public interface AuthService {
     AuthResponse login(LoginRequest request);
     UserProfileResponse getCurrentUserProfile();
     void changePassword(ChangePasswordRequest request);
+    UserProfileResponse updatePaymentInfo(UpdatePaymentInfoRequest request);
 }

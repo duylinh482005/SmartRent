@@ -12,6 +12,7 @@ import com.smartrent.repository.InvoiceRepository;
 import com.smartrent.repository.RoomRepository;
 import com.smartrent.repository.TenantRepository;
 import com.smartrent.service.ContractService;
+import com.smartrent.service.InvoiceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
@@ -46,6 +47,7 @@ public class ContractServiceImpl implements ContractService {
     private final RoomRepository roomRepository;
     private final TenantRepository tenantRepository;
     private final InvoiceRepository invoiceRepository;
+    private final InvoiceService invoiceService;
 
     @Override
     public ContractResponse create(ContractRequest request) {
@@ -90,12 +92,15 @@ public class ContractServiceImpl implements ContractService {
                 .monthlyRent(request.getMonthlyRent())
                 .numberOfPeople(request.getNumberOfPeople())
                 .status(Contract.Status.ACTIVE)
+                .depositBalance(request.getMonthlyRent())
                 .build();
 
         room.setStatus(Room.Status.OCCUPIED);
         roomRepository.save(room);
 
-        return toResponse(contractRepository.save(contract));
+        Contract saved = contractRepository.save(contract);
+        invoiceService.createFirstMonthInvoice(saved.getId());
+        return toResponse(saved);
     }
 
     @Override

@@ -23,6 +23,18 @@ public class User extends BaseEntity {
     @Column(nullable = false, length = 20)
     private Role role;
 
+    @Column(length = 100)
+    private String bankName;
+
+    @Column(length = 50)
+    private String bankAccountNumber;
+
+    @Column(length = 100)
+    private String bankAccountName;
+
+    @Column(columnDefinition = "LONGTEXT")
+    private String qrCodeUrl;
+
     public enum Role {
         ADMIN, OWNER, STAFF
     }

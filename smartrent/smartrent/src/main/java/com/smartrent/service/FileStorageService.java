@@ -5,5 +5,7 @@ import org.springframework.web.multipart.MultipartFile;
 public interface FileStorageService {
 
     String storeRoomImage(MultipartFile file);
+
+    String storeQrImage(MultipartFile file);
 }
 

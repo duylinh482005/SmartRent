@@ -23,5 +23,14 @@ public class UploadController {
                 .toUriString();
         return ResponseEntity.ok(ApiResponse.success(absoluteUrl));
     }
+
+    @PostMapping("/qr")
+    public ResponseEntity<ApiResponse<String>> uploadQrImage(@RequestParam("file") MultipartFile file) {
+        String relativePath = fileStorageService.storeQrImage(file);
+        String absoluteUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path(relativePath)
+                .toUriString();
+        return ResponseEntity.ok(ApiResponse.success(absoluteUrl));
+    }
 }
 

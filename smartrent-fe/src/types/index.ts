@@ -12,6 +12,10 @@ export interface UserProfile {
   role: string;
   createdAt: string;
   updatedAt?: string | null;
+  bankName?: string | null;
+  bankAccountNumber?: string | null;
+  bankAccountName?: string | null;
+  qrCodeUrl?: string | null;
 }
 
 export interface Property {
@@ -48,6 +52,9 @@ export interface Tenant {
   phone: string;
   email?: string;
   idCardNumber?: string;
+  latePaymentCount: number;
+  totalLateDays: number;
+  lastLatePaymentDate?: string | null;
   createdAt: string;
 }
 
@@ -63,6 +70,7 @@ export interface Contract {
   endDate: string;
   monthlyRent: number;
   numberOfPeople?: number | null;
+  depositBalance?: number | null;
   status: 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
   createdAt: string;
 }
@@ -90,7 +98,11 @@ export interface Invoice {
   serviceFee: number;
   networkUnitPrice: number;
   networkFee: number;
+  depositFee?: number | null;
   totalAmount: number;
+  lateFee: number;
+  overdueDays: number;
+  totalWithLateFee: number;
   status: 'UNPAID' | 'PAID' | 'OVERDUE';
   dueDate?: string | null;
   paidAt?: string | null;

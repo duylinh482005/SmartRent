@@ -23,6 +23,10 @@ public class Invoice extends BaseEntity {
     @Column(name = "billing_month", nullable = false)
     private LocalDate billingMonth;
 
+    // Tiền cọc (chỉ có ở hóa đơn tháng đầu, bằng 1 tháng tiền phòng)
+    @Column(name = "deposit_fee", precision = 12, scale = 2)
+    private BigDecimal depositFee;
+
     // Tiền phòng
     @Column(name = "room_fee", nullable = false, precision = 12, scale = 2)
     private BigDecimal roomFee;
@@ -86,6 +90,16 @@ public class Invoice extends BaseEntity {
 
     @Column(name = "payment_confirmed_by", length = 100)
     private String paymentConfirmedBy;
+
+    // Tiền phạt quá hạn (100.000đ/ngày)
+    @Column(name = "late_fee", precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal lateFee = BigDecimal.ZERO;
+
+    // Số ngày quá hạn hiện tại
+    @Column(name = "overdue_days")
+    @Builder.Default
+    private Integer overdueDays = 0;
 
     @Column(name = "notification_sent", nullable = false)
     @Builder.Default

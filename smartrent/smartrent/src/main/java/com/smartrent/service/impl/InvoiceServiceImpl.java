@@ -5,8 +5,12 @@ import com.smartrent.dto.response.InvoiceResponse;
 import com.smartrent.entity.Contract;
 import com.smartrent.entity.Invoice;
 import com.smartrent.entity.Property;
+import com.smartrent.entity.Room;
+import com.smartrent.entity.Tenant;
 import com.smartrent.repository.ContractRepository;
 import com.smartrent.repository.InvoiceRepository;
+import com.smartrent.repository.RoomRepository;
+import com.smartrent.repository.TenantRepository;
 import com.smartrent.service.InvoiceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,12 +21,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -36,8 +43,13 @@ public class InvoiceServiceImpl implements InvoiceService {
     private static final String ERR_DELETE_OVERDUE = "Không thể xóa: Hóa đơn đang ở trạng thái Quá hạn";
     private static final DateTimeFormatter DELETE_DATE_FMT = DateTimeFormatter.ofPattern("d/M/yyyy");
 
+    private static final BigDecimal DAILY_LATE_FEE = new BigDecimal("100000");
+    private static final int AUTO_TERMINATE_DAYS = 3;
+
     private final InvoiceRepository invoiceRepository;
     private final ContractRepository contractRepository;
+    private final RoomRepository roomRepository;
+    private final TenantRepository tenantRepository;
 
     @Override
     public InvoiceResponse create(InvoiceRequest request) {
@@ -115,6 +127,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         Invoice invoice = Invoice.builder()
                 .contract(contract)
                 .billingMonth(billingMonth)
+                .depositFee(BigDecimal.ZERO)
                 .roomFee(roomFee)
                 .electricOld(electricOld)
                 .electricNew(request.getElectricNew())
@@ -131,7 +144,65 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .networkFee(networkFee)
                 .totalAmount(totalAmount)
                 .status(Invoice.Status.UNPAID)
-                .dueDate(resolveDefaultDueDateForMonth(billingMonth))
+                .dueDate(LocalDate.now().plusDays(5))
+                .build();
+
+        return toResponse(invoiceRepository.save(invoice));
+    }
+
+    @Override
+    public InvoiceResponse createFirstMonthInvoice(Long contractId) {
+        Contract contract = contractRepository.findByIdAndDeletedFalse(contractId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy hợp đồng id: " + contractId));
+
+        LocalDate startDate = contract.getStartDate();
+        LocalDate billingMonth = startDate.withDayOfMonth(1);
+
+        if (invoiceRepository.existsByContractIdAndBillingMonthAndDeletedFalse(contractId, billingMonth)) {
+            throw new RuntimeException("Hóa đơn tháng đầu đã tồn tại cho hợp đồng này");
+        }
+
+        int daysInMonth = startDate.lengthOfMonth();
+        int daysRemaining = daysInMonth - startDate.getDayOfMonth() + 1;
+        BigDecimal ratio = BigDecimal.valueOf(daysRemaining)
+                .divide(BigDecimal.valueOf(daysInMonth), 10, RoundingMode.HALF_UP);
+
+        Property property = contract.getRoom().getProperty();
+        BigDecimal servicePrice = property.getServiceUnitPrice();
+        BigDecimal networkPrice = property.getNetworkFee();
+        int numberOfPeople = contract.getNumberOfPeople() != null ? contract.getNumberOfPeople() : 0;
+
+        BigDecimal depositFee = contract.getMonthlyRent();
+        BigDecimal roomFee = contract.getMonthlyRent()
+                .multiply(ratio).setScale(0, RoundingMode.HALF_UP);
+        BigDecimal serviceFee = servicePrice
+                .multiply(BigDecimal.valueOf(numberOfPeople))
+                .multiply(ratio).setScale(0, RoundingMode.HALF_UP);
+        BigDecimal networkFee = networkPrice
+                .multiply(ratio).setScale(0, RoundingMode.HALF_UP);
+        BigDecimal totalAmount = depositFee.add(roomFee).add(serviceFee).add(networkFee);
+
+        Invoice invoice = Invoice.builder()
+                .contract(contract)
+                .billingMonth(billingMonth)
+                .depositFee(depositFee)
+                .roomFee(roomFee)
+                .electricOld(0)
+                .electricNew(0)
+                .electricUnitPrice(property.getElectricUnitPrice())
+                .electricFee(BigDecimal.ZERO)
+                .waterOld(0)
+                .waterNew(0)
+                .waterUnitPrice(property.getWaterUnitPrice())
+                .waterFee(BigDecimal.ZERO)
+                .servicePeople(numberOfPeople)
+                .serviceUnitPrice(servicePrice)
+                .serviceFee(serviceFee)
+                .networkUnitPrice(networkPrice)
+                .networkFee(networkFee)
+                .totalAmount(totalAmount)
+                .status(Invoice.Status.UNPAID)
+                .dueDate(LocalDate.now().plusDays(5))
                 .build();
 
         return toResponse(invoiceRepository.save(invoice));
@@ -218,43 +289,116 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Scheduled(cron = "0 10 0 * * *", zone = "Asia/Ho_Chi_Minh")
     public void updateOverdueInvoicesDaily() {
         LocalDate today = LocalDate.now();
-        List<Invoice> unpaidInvoices = invoiceRepository.findByStatusAndDeletedFalse(Invoice.Status.UNPAID);
+        LocalDateTime now = LocalDateTime.now();
 
-        if (unpaidInvoices.isEmpty()) {
-            return;
-        }
-
-        LocalDateTime transitionedAt = LocalDateTime.now();
-        List<Invoice> overdueInvoices = new ArrayList<>();
-
-        for (Invoice invoice : unpaidInvoices) {
-            LocalDate dueDate = resolveDueDate(invoice);
-            if (dueDate != null && dueDate.isBefore(today)) {
+        // Bước 1: Chuyển UNPAID → OVERDUE nếu đã quá dueDate
+        List<Invoice> unpaid = invoiceRepository.findByStatusAndDeletedFalse(Invoice.Status.UNPAID);
+        List<Invoice> newlyOverdue = new ArrayList<>();
+        for (Invoice invoice : unpaid) {
+            if (invoice.getDueDate() != null && invoice.getDueDate().isBefore(today)) {
                 invoice.setStatus(Invoice.Status.OVERDUE);
-                overdueInvoices.add(invoice);
-                log.info("[INVOICE_OVERDUE] invoiceId={} transitionedAt={} dueDate={}",
-                        invoice.getId(), transitionedAt, dueDate);
+                newlyOverdue.add(invoice);
+                log.info("[OVERDUE_START] invoiceId={} dueDate={}", invoice.getId(), invoice.getDueDate());
             }
         }
-
-        if (!overdueInvoices.isEmpty()) {
-            invoiceRepository.saveAll(overdueInvoices);
-            log.info("[INVOICE_OVERDUE] totalUpdated={} runAt={}", overdueInvoices.size(), transitionedAt);
+        if (!newlyOverdue.isEmpty()) {
+            invoiceRepository.saveAll(newlyOverdue);
         }
-    }
 
-    private LocalDate resolveDefaultDueDateForMonth(LocalDate billingMonth) {
-        if (billingMonth == null) {
-            return null;
-        }
-        return YearMonth.from(billingMonth).atEndOfMonth();
-    }
+        // Bước 2: Tính tiền phạt cho tất cả hóa đơn OVERDUE, gom theo hợp đồng
+        List<Invoice> overdueAll = invoiceRepository.findByStatusAndDeletedFalse(Invoice.Status.OVERDUE);
+        if (overdueAll.isEmpty()) return;
 
-    private LocalDate resolveDueDate(Invoice invoice) {
-        if (invoice.getDueDate() != null) {
-            return invoice.getDueDate();
+        Map<Long, Contract> contractById = new HashMap<>();
+        Map<Long, List<Invoice>> invoicesByContract = new HashMap<>();
+        for (Invoice invoice : overdueAll) {
+            Contract contract = invoice.getContract();
+            Long contractId = contract.getId();
+            contractById.put(contractId, contract);
+            invoicesByContract.computeIfAbsent(contractId, k -> new ArrayList<>()).add(invoice);
         }
-        return resolveDefaultDueDateForMonth(invoice.getBillingMonth());
+
+        List<Invoice> invoicesToSave = new ArrayList<>();
+        List<Contract> contractsToSave = new ArrayList<>();
+        List<Tenant> tenantsToSave = new ArrayList<>();
+        List<Room> roomsToSave = new ArrayList<>();
+
+        for (Map.Entry<Long, List<Invoice>> entry : invoicesByContract.entrySet()) {
+            Long contractId = entry.getKey();
+            List<Invoice> contractInvoices = entry.getValue();
+            Contract contract = contractById.get(contractId);
+
+            if (contract.getStatus() != Contract.Status.ACTIVE) continue;
+
+            boolean shouldTerminate = false;
+            int maxOverdueDays = 0;
+
+            for (Invoice invoice : contractInvoices) {
+                long newOverdueDays = ChronoUnit.DAYS.between(invoice.getDueDate(), today);
+                long prevDays = invoice.getOverdueDays() != null ? invoice.getOverdueDays() : 0;
+                long increment = newOverdueDays - prevDays;
+
+                if (increment > 0) {
+                    BigDecimal additionalFine = DAILY_LATE_FEE.multiply(BigDecimal.valueOf(increment));
+                    BigDecimal currentLateFee = invoice.getLateFee() != null ? invoice.getLateFee() : BigDecimal.ZERO;
+                    invoice.setLateFee(currentLateFee.add(additionalFine));
+                    invoice.setOverdueDays((int) newOverdueDays);
+
+                    BigDecimal newBalance = contract.getDepositBalance() != null
+                            ? contract.getDepositBalance().subtract(additionalFine)
+                            : BigDecimal.ZERO;
+                    contract.setDepositBalance(newBalance.max(BigDecimal.ZERO));
+
+                    log.info("[LATE_FEE] invoiceId={} overdueDays={} lateFee={} depositBalance={}",
+                            invoice.getId(), newOverdueDays, invoice.getLateFee(), contract.getDepositBalance());
+                }
+
+                if (newOverdueDays >= AUTO_TERMINATE_DAYS) {
+                    shouldTerminate = true;
+                    if (newOverdueDays > maxOverdueDays) maxOverdueDays = (int) newOverdueDays;
+                }
+
+                invoicesToSave.add(invoice);
+            }
+
+            // Bước 3: Tự động chấm dứt hợp đồng sau 3 ngày quá hạn
+            if (shouldTerminate) {
+                contract.setDepositBalance(BigDecimal.ZERO);
+                contract.setStatus(Contract.Status.TERMINATED);
+
+                Room room = contract.getRoom();
+                room.setStatus(Room.Status.AVAILABLE);
+                roomsToSave.add(room);
+
+                // Tiền cọc tự thanh toán toàn bộ hóa đơn quá hạn
+                for (Invoice invoice : contractInvoices) {
+                    invoice.setStatus(Invoice.Status.PAID);
+                    invoice.setPaidAt(now);
+                    invoice.setPaymentConfirmedBy("system:deposit-forfeited");
+                    log.info("[AUTO_TERMINATE] invoiceId={} settledByDeposit contractId={}", invoice.getId(), contractId);
+                }
+
+                // Cập nhật lịch sử trễ hạn của khách thuê
+                Tenant tenant = contract.getTenant();
+                tenant.setLatePaymentCount(tenant.getLatePaymentCount() + 1);
+                tenant.setTotalLateDays(tenant.getTotalLateDays() + maxOverdueDays);
+                tenant.setLastLatePaymentDate(today);
+                tenantsToSave.add(tenant);
+
+                log.warn("[AUTO_TERMINATE] contractId={} tenantId={} overdueDays={} depositForfeited runAt={}",
+                        contractId, tenant.getId(), maxOverdueDays, now);
+            }
+
+            contractsToSave.add(contract);
+        }
+
+        if (!invoicesToSave.isEmpty()) invoiceRepository.saveAll(invoicesToSave);
+        if (!contractsToSave.isEmpty()) contractRepository.saveAll(contractsToSave);
+        if (!roomsToSave.isEmpty()) roomRepository.saveAll(roomsToSave);
+        if (!tenantsToSave.isEmpty()) tenantRepository.saveAll(tenantsToSave);
+
+        log.info("[DAILY_SCHEDULER] invoicesProcessed={} contractsUpdated={} terminated={} runAt={}",
+                invoicesToSave.size(), contractsToSave.size(), roomsToSave.size(), now);
     }
 
     private String getCurrentUsername() {
@@ -290,6 +434,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .roomNumber(contract.getRoom().getRoomNumber())
                 .propertyName(contract.getRoom().getProperty().getName())
                 .billingMonth(i.getBillingMonth())
+                .depositFee(zeroIfNull(i.getDepositFee()))
                 .roomFee(i.getRoomFee())
                 .electricOld(i.getElectricOld())
                 .electricNew(i.getElectricNew())
@@ -307,6 +452,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .networkUnitPrice(zeroIfNull(i.getNetworkUnitPrice()))
                 .networkFee(zeroIfNull(i.getNetworkFee()))
                 .totalAmount(zeroIfNull(i.getTotalAmount()))
+                .lateFee(zeroIfNull(i.getLateFee()))
+                .overdueDays(i.getOverdueDays() != null ? i.getOverdueDays() : 0)
+                .totalWithLateFee(zeroIfNull(i.getTotalAmount()).add(zeroIfNull(i.getLateFee())))
                 .status(i.getStatus())
                 .dueDate(i.getDueDate())
                 .paidAt(i.getPaidAt())

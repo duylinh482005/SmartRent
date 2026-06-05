@@ -8,6 +8,7 @@ import java.util.List;
 
 public interface InvoiceService {
     InvoiceResponse create(InvoiceRequest request);
+    InvoiceResponse createFirstMonthInvoice(Long contractId);
     InvoiceResponse getById(Long id);
     List<InvoiceResponse> getAll();
     List<InvoiceResponse> getByContract(Long contractId);

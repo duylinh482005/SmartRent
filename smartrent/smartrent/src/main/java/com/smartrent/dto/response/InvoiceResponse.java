@@ -20,6 +20,7 @@ public class InvoiceResponse {
     private LocalDate billingMonth;
 
     // Chi tiết
+    private BigDecimal depositFee;
     private BigDecimal roomFee;
     private Integer electricOld;
     private Integer electricNew;
@@ -41,6 +42,9 @@ public class InvoiceResponse {
     private BigDecimal networkFee;
 
     private BigDecimal totalAmount;
+    private BigDecimal lateFee;
+    private int overdueDays;
+    private BigDecimal totalWithLateFee;
     private Invoice.Status status;
     private LocalDate dueDate;
     private LocalDateTime paidAt;

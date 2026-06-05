@@ -33,6 +33,10 @@ public class Contract extends BaseEntity {
     @Column(name = "monthly_rent", nullable = false, precision = 12, scale = 2)
     private BigDecimal monthlyRent;
 
+    // Số dư tiền cọc còn lại (trừ dần theo tiền phạt quá hạn)
+    @Column(name = "deposit_balance", precision = 12, scale = 2)
+    private BigDecimal depositBalance;
+
     @Column(name = "number_of_people")
     private Integer numberOfPeople;
 

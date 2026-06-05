@@ -3,16 +3,19 @@ package com.smartrent.controller;
 import com.smartrent.dto.request.InvoiceRequest;
 import com.smartrent.dto.response.InvoiceResponse;
 import com.smartrent.entity.Invoice;
+import com.smartrent.entity.User;
+import com.smartrent.repository.UserRepository;
 import com.smartrent.service.InvoiceService;
+import com.smartrent.service.PdfService;
 import com.smartrent.util.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import com.smartrent.service.PdfService;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
@@ -23,7 +26,7 @@ public class InvoiceController {
 
     private final InvoiceService invoiceService;
     private final PdfService pdfService;
-
+    private final UserRepository userRepository;
 
     @PostMapping
     public ResponseEntity<ApiResponse<InvoiceResponse>> create(
@@ -55,7 +58,13 @@ public class InvoiceController {
     @GetMapping("/{id}/pdf")
     public ResponseEntity<byte[]> downloadPdf(@PathVariable Long id) {
         InvoiceResponse invoice = invoiceService.getById(id);
-        byte[] pdf = pdfService.generateInvoicePdf(invoice);
+        User user = getCurrentUser();
+        PdfService.OwnerInfo owner = new PdfService.OwnerInfo(
+                user.getBankName(),
+                user.getBankAccountNumber(),
+                user.getBankAccountName(),
+                user.getQrCodeUrl());
+        byte[] pdf = pdfService.generateInvoicePdf(invoice, owner);
 
         String filename = "hoadon_" + id + "_thang"
                 + invoice.getBillingMonth().getMonthValue()
@@ -77,5 +86,11 @@ public class InvoiceController {
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
         invoiceService.delete(id);
         return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+    private User getCurrentUser() {
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy user"));
     }
 }

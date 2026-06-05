@@ -791,7 +791,16 @@ export default function InvoicePage() {
                     <td className="px-5 py-3 text-gray-600">{formatMonth(invoice.billingMonth)}</td>
                     <td className="px-5 py-3 text-gray-600">{formatDate(invoice.createdAt)}</td>
                     <td className="px-5 py-3 text-gray-600">{dueDate ? formatDate(dueDate.toISOString()) : '-'}</td>
-                    <td className="px-5 py-3 font-medium text-gray-900">{formatVnd(invoice.totalAmount)}</td>
+                    <td className="px-5 py-3 font-medium">
+                      {invoice.status === 'OVERDUE' && invoice.overdueDays > 0 ? (
+                        <span className="text-red-600">
+                          {formatVnd(invoice.totalWithLateFee)}
+                          <span className="ml-1 text-xs font-normal text-red-400">(+{invoice.overdueDays}ng phạt)</span>
+                        </span>
+                      ) : (
+                        <span className="text-gray-900">{formatVnd(invoice.totalAmount)}</span>
+                      )}
+                    </td>
                     <td className="px-5 py-3">
                       <Badge
                         label={STATUS_LABELS[invoice.status]}
@@ -1190,68 +1199,41 @@ export default function InvoicePage() {
             <div className="border border-gray-100 rounded-xl overflow-hidden">
               <div className="bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">Chi tiết khoản thu</div>
               <div className="divide-y divide-gray-50">
+                {(detailInvoice.depositFee ?? 0) > 0 && (
+                  <div className="flex justify-between px-4 py-3 text-sm bg-amber-50">
+                    <span className="text-amber-700 font-medium">Tiền đặt cọc (1 tháng)</span>
+                    <span className="font-medium text-amber-700">{formatVnd(detailInvoice.depositFee ?? 0)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between px-4 py-3 text-sm">
                   <span className="text-gray-600">Tiền phòng</span>
                   <span className="font-medium">{formatVnd(detailInvoice.roomFee)}</span>
                 </div>
+                {(detailInvoice.depositFee ?? 0) === 0 && (
+                  <>
+                    <div className="flex justify-between px-4 py-3 text-sm">
+                      <span className="text-gray-600">
+                        Tiền điện ({detailInvoice.electricOld} → {detailInvoice.electricNew} = {detailInvoice.electricUsed} kWh × {formatVnd(detailInvoice.electricUnitPrice)})
+                      </span>
+                      <span className="font-medium">{formatVnd(detailInvoice.electricFee)}</span>
+                    </div>
+                    <div className="flex justify-between px-4 py-3 text-sm">
+                      <span className="text-gray-600">
+                        Tiền nước ({detailInvoice.waterOld} → {detailInvoice.waterNew} = {detailInvoice.waterUsed} m³ × {formatVnd(detailInvoice.waterUnitPrice)})
+                      </span>
+                      <span className="font-medium">{formatVnd(detailInvoice.waterFee)}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between px-4 py-3 text-sm">
                   <span className="text-gray-600">
-                    Tiền điện (
-                    {detailInvoice.electricOld}
-                    {' '}
-                    {'->'}
-                    {' '}
-                    {detailInvoice.electricNew}
-                    {' '}
-                    =
-                    {' '}
-                    {detailInvoice.electricUsed}
-                    {' '}
-                    kWh x
-                    {' '}
-                    {formatVnd(detailInvoice.electricUnitPrice)}
-                    )
-                  </span>
-                  <span className="font-medium">{formatVnd(detailInvoice.electricFee)}</span>
-                </div>
-                <div className="flex justify-between px-4 py-3 text-sm">
-                  <span className="text-gray-600">
-                    Tiền nước (
-                    {detailInvoice.waterOld}
-                    {' '}
-                    {'->'}
-                    {' '}
-                    {detailInvoice.waterNew}
-                    {' '}
-                    =
-                    {' '}
-                    {detailInvoice.waterUsed}
-                    {' '}
-                    m3 x
-                    {' '}
-                    {formatVnd(detailInvoice.waterUnitPrice)}
-                    )
-                  </span>
-                  <span className="font-medium">{formatVnd(detailInvoice.waterFee)}</span>
-                </div>
-                <div className="flex justify-between px-4 py-3 text-sm">
-                  <span className="text-gray-600">
-                    Phí dịch vụ (
-                    {detailInvoice.servicePeople}
-                    {' '}
-                    người x
-                    {' '}
-                    {formatVnd(detailInvoice.serviceUnitPrice)}
-                    )
+                    Phí dịch vụ ({detailInvoice.servicePeople} người × {formatVnd(detailInvoice.serviceUnitPrice)})
                   </span>
                   <span className="font-medium">{formatVnd(detailInvoice.serviceFee)}</span>
                 </div>
                 <div className="flex justify-between px-4 py-3 text-sm">
                   <span className="text-gray-600">
-                    Phí mạng (1 tháng x
-                    {' '}
-                    {formatVnd(detailInvoice.networkUnitPrice)}
-                    )
+                    Phí mạng (1 tháng × {formatVnd(detailInvoice.networkUnitPrice)})
                   </span>
                   <span className="font-medium">{formatVnd(detailInvoice.networkFee)}</span>
                 </div>
@@ -1259,6 +1241,20 @@ export default function InvoicePage() {
                   <span className="font-medium text-gray-900">Tổng cộng</span>
                   <span className="font-medium text-lg text-primary-800">{formatVnd(detailInvoice.totalAmount)}</span>
                 </div>
+                {detailInvoice.overdueDays > 0 && (
+                  <>
+                    <div className="flex justify-between px-4 py-3 text-sm bg-red-50">
+                      <span className="text-red-700 font-medium">
+                        Tiền phạt quá hạn ({detailInvoice.overdueDays} ngày × 100.000đ)
+                      </span>
+                      <span className="font-medium text-red-700">{formatVnd(detailInvoice.lateFee)}</span>
+                    </div>
+                    <div className="flex justify-between px-4 py-3 bg-red-100">
+                      <span className="font-bold text-red-900">Tổng phải trả (gồm phạt)</span>
+                      <span className="font-bold text-lg text-red-800">{formatVnd(detailInvoice.totalWithLateFee)}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 

@@ -51,6 +51,33 @@ public class FileStorageServiceImpl implements FileStorageService {
         return "/uploads/rooms/" + fileName;
     }
 
+    @Override
+    public String storeQrImage(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new RuntimeException("File QR không hợp lệ");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new RuntimeException("Chỉ hỗ trợ upload file ảnh QR");
+        }
+
+        String extension = extractAndValidateExtension(file.getOriginalFilename());
+        String fileName = UUID.randomUUID() + extension;
+
+        Path qrDir = uploadRootDir.resolve("qr");
+        Path targetFile = qrDir.resolve(fileName);
+
+        try {
+            Files.createDirectories(qrDir);
+            Files.copy(file.getInputStream(), targetFile, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            throw new RuntimeException("Không thể lưu file QR", e);
+        }
+
+        return "/uploads/qr/" + fileName;
+    }
+
     private String extractAndValidateExtension(String originalName) {
         if (originalName == null || !originalName.contains(".")) {
             throw new RuntimeException("Định dạng file ảnh không hợp lệ");

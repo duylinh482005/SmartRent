@@ -3,6 +3,7 @@ package com.smartrent.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,6 +26,18 @@ public class Tenant extends BaseEntity {
 
     @Column(name = "id_card_number", length = 20, unique = true)
     private String idCardNumber;
+
+    // Thống kê trễ hạn - dùng cho AI phân tích/cảnh báo khách hay chậm trễ
+    @Column(name = "late_payment_count", nullable = false)
+    @Builder.Default
+    private int latePaymentCount = 0;
+
+    @Column(name = "total_late_days", nullable = false)
+    @Builder.Default
+    private int totalLateDays = 0;
+
+    @Column(name = "last_late_payment_date")
+    private LocalDate lastLatePaymentDate;
 
     @OneToMany(mappedBy = "tenant", cascade = CascadeType.ALL)
     @Builder.Default

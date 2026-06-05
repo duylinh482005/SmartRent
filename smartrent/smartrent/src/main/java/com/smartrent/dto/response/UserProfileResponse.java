@@ -14,4 +14,8 @@ public class UserProfileResponse {
     private String role;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private String bankName;
+    private String bankAccountNumber;
+    private String bankAccountName;
+    private String qrCodeUrl;
 }

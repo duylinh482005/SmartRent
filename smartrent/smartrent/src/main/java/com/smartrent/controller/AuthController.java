@@ -3,6 +3,7 @@ package com.smartrent.controller;
 import com.smartrent.dto.request.ChangePasswordRequest;
 import com.smartrent.dto.request.LoginRequest;
 import com.smartrent.dto.request.RegisterRequest;
+import com.smartrent.dto.request.UpdatePaymentInfoRequest;
 import com.smartrent.dto.response.AuthResponse;
 import com.smartrent.dto.response.UserProfileResponse;
 import com.smartrent.service.AuthService;
@@ -43,5 +44,11 @@ public class AuthController {
             @Valid @RequestBody ChangePasswordRequest request) {
         authService.changePassword(request);
         return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+    @PatchMapping("/payment-info")
+    public ResponseEntity<ApiResponse<UserProfileResponse>> updatePaymentInfo(
+            @RequestBody UpdatePaymentInfoRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(authService.updatePaymentInfo(request)));
     }
 }

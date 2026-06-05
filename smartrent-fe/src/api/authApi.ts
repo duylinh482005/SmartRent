@@ -13,4 +13,20 @@ export const authApi = {
 
   changePassword: (currentPassword: string, newPassword: string) =>
     axiosClient.patch<ApiResponse<null>>('/auth/change-password', { currentPassword, newPassword }),
+
+  updatePaymentInfo: (data: {
+    bankName?: string;
+    bankAccountNumber?: string;
+    bankAccountName?: string;
+    qrCodeUrl?: string;
+  }) =>
+    axiosClient.patch<ApiResponse<UserProfile>>('/auth/payment-info', data),
+
+  uploadQrImage: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return axiosClient.post<ApiResponse<string>>('/uploads/qr', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };

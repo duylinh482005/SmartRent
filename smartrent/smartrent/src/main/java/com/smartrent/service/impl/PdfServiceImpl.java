@@ -2,16 +2,21 @@ package com.smartrent.service.impl;
 
 import com.lowagie.text.*;
 import com.lowagie.text.Font;
+import com.lowagie.text.Image;
 import com.lowagie.text.Rectangle;
 import com.lowagie.text.pdf.*;
 import com.smartrent.dto.response.InvoiceResponse;
+import com.smartrent.entity.Invoice;
 import com.smartrent.service.PdfService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ResourceUtils;
 
 import java.awt.*;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
@@ -19,177 +24,254 @@ import java.util.Locale;
 @Service
 public class PdfServiceImpl implements PdfService {
 
-    private static final NumberFormat VND = NumberFormat.getInstance(new Locale("vi", "VN"));
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-    private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("MM/yyyy");
+    private static final NumberFormat VND       = NumberFormat.getInstance(new Locale("vi", "VN"));
+    private static final DateTimeFormatter DATE  = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("MM/yyyy");
+    private static final DateTimeFormatter DT    = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+
+    private static final Color PRIMARY    = new Color(30, 80, 160);
+    private static final Color ROW_ALT    = new Color(245, 248, 255);
+    private static final Color BORDER_CLR = new Color(210, 218, 230);
+    private static final Color TEXT_DARK  = new Color(26, 26, 46);
+    private static final Color TEXT_GRAY  = new Color(107, 114, 128);
+    private static final Color GREEN      = new Color(5, 150, 105);
+    private static final Color ORANGE     = new Color(217, 119, 6);
+    private static final Color RED_TOTAL  = new Color(185, 28, 28);
+
+    private final Path uploadRootDir;
+
+    public PdfServiceImpl(@Value("${app.upload.dir:uploads}") String uploadDir) {
+        this.uploadRootDir = Path.of(uploadDir).toAbsolutePath().normalize();
+    }
 
     @Override
-    public byte[] generateInvoicePdf(InvoiceResponse invoice) {
+    public byte[] generateInvoicePdf(InvoiceResponse inv, OwnerInfo owner) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            Document doc = new Document(PageSize.A4, 40, 40, 50, 40);
+            // A5 portrait — compact, screenshot-friendly
+            Document doc = new Document(PageSize.A5, 25, 25, 28, 22);
             PdfWriter.getInstance(doc, out);
             doc.open();
 
-            // Load font tiếng Việt
-            BaseFont baseFont = BaseFont.createFont(
-                    loadFontPath("fonts/Roboto-Regular.ttf"),
+            BaseFont base = BaseFont.createFont(loadFontPath("fonts/Roboto-Regular.ttf"),
                     BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
-            BaseFont boldFont = BaseFont.createFont(
-                    loadFontPath("fonts/Roboto-Bold.ttf"),
+            BaseFont bold = BaseFont.createFont(loadFontPath("fonts/Roboto-Bold.ttf"),
                     BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
 
-            Font titleFont    = new Font(boldFont, 18, Font.NORMAL, new Color(30, 80, 160));
-            Font subTitleFont = new Font(boldFont, 11, Font.NORMAL, new Color(60, 60, 60));
-            Font headerFont   = new Font(boldFont, 10, Font.NORMAL, Color.WHITE);
-            Font normalFont   = new Font(baseFont, 10, Font.NORMAL, new Color(40, 40, 40));
-            Font boldSmall    = new Font(boldFont, 10, Font.NORMAL, new Color(40, 40, 40));
-            Font totalFont    = new Font(boldFont, 12, Font.NORMAL, new Color(200, 50, 50));
-            Font statusFont   = new Font(boldFont, 11, Font.NORMAL,
-                    invoice.getStatus().name().equals("PAID")
-                            ? new Color(0, 150, 80) : new Color(200, 100, 0));
+            Font fTitle    = new Font(bold,  15,   Font.NORMAL, PRIMARY);
+            Font fSub      = new Font(base,   7.5f, Font.NORMAL, TEXT_GRAY);
+            Font fDocTitle = new Font(bold,   9,    Font.NORMAL, PRIMARY);
+            Font fMeta     = new Font(base,   7.5f, Font.NORMAL, TEXT_GRAY);
+            Font fLabel    = new Font(bold,   8,    Font.NORMAL, TEXT_DARK);
+            Font fValue    = new Font(base,   8,    Font.NORMAL, TEXT_DARK);
+            Font fTH       = new Font(bold,   8,    Font.NORMAL, Color.WHITE);
+            Font fCell     = new Font(base,   8,    Font.NORMAL, TEXT_DARK);
+            Font fCellBold = new Font(bold,   8,    Font.NORMAL, TEXT_DARK);
+            Font fTotal    = new Font(bold,  13,    Font.NORMAL, RED_TOTAL);
+            Font fFooter   = new Font(base,   6.5f, Font.ITALIC, TEXT_GRAY);
 
             // ── HEADER ──────────────────────────────────────────────
-            PdfPTable header = new PdfPTable(2);
-            header.setWidthPercentage(100);
-            header.setWidths(new float[]{3f, 1.5f});
-            header.setSpacingAfter(16);
+            PdfPTable hdr = new PdfPTable(2);
+            hdr.setWidthPercentage(100);
+            hdr.setWidths(new float[]{3f, 2.2f});
+            hdr.setSpacingAfter(6);
 
-            // Tên công ty bên trái
-            PdfPCell companyCell = new PdfPCell();
-            companyCell.setBorder(Rectangle.NO_BORDER);
-            companyCell.addElement(new Paragraph("SMARTRENT", titleFont));
-            Paragraph subP = new Paragraph("Hệ thống quản lý phòng trọ thông minh", subTitleFont);
-            companyCell.addElement(subP);
-            header.addCell(companyCell);
+            PdfPCell brand = noBorder();
+            brand.addElement(new Paragraph("SMARTRENT", fTitle));
+            brand.addElement(new Paragraph("Hệ thống quản lý phòng trọ thông minh", fSub));
+            hdr.addCell(brand);
 
-            // Thông tin hóa đơn bên phải
-            PdfPCell infoCell = new PdfPCell();
-            infoCell.setBorder(Rectangle.NO_BORDER);
-            infoCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
-            infoCell.addElement(new Paragraph("HÓA ĐƠN TIỀN PHÒNG", boldSmall));
-            infoCell.addElement(new Paragraph(
-                    "Số: #" + String.format("%05d", invoice.getId()), normalFont));
-            infoCell.addElement(new Paragraph(
-                    "Tháng: " + invoice.getBillingMonth().format(MONTH_FMT), normalFont));
-            infoCell.addElement(new Paragraph(
-                    "Ngày tạo: " + invoice.getCreatedAt().format(
-                            DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")), normalFont));
-            header.addCell(infoCell);
+            PdfPCell meta = noBorder();
+            meta.setHorizontalAlignment(Element.ALIGN_RIGHT);
+            meta.addElement(rPara("HÓA ĐƠN TIỀN PHÒNG", fDocTitle));
+            meta.addElement(rPara("Số: #" + String.format("%05d", inv.getId()), fMeta));
+            meta.addElement(rPara("Tháng: " + inv.getBillingMonth().format(MONTH), fMeta));
+            meta.addElement(rPara("Ngày tạo: " + inv.getCreatedAt().format(DT), fMeta));
+            hdr.addCell(meta);
+            doc.add(hdr);
 
-            doc.add(header);
+            hLine(doc, PRIMARY, 1.5f);
+            doc.add(gap(4));
 
-            // Đường kẻ ngang
-            drawHorizontalLine(doc, new Color(30, 80, 160), 2f);
-            doc.add(Chunk.NEWLINE);
+            // ── THÔNG TIN KHÁCH ──────────────────────────────────────
+            PdfPTable info = new PdfPTable(4);
+            info.setWidthPercentage(100);
+            info.setWidths(new float[]{1.4f, 2.8f, 1.2f, 1.8f});
+            info.setSpacingAfter(6);
 
-            // ── THÔNG TIN KHÁCH THUÊ ─────────────────────────────────
-            doc.add(new Paragraph("THÔNG TIN KHÁCH THUÊ", subTitleFont));
-            doc.add(Chunk.NEWLINE);
+            infoCell(info, "Khách thuê:", fLabel);
+            infoCell(info, inv.getTenantName(), fValue);
+            infoCell(info, "Khu trọ:", fLabel);
+            infoCell(info, inv.getPropertyName(), fValue);
+            infoCell(info, "Phòng:", fLabel);
+            infoCell(info, inv.getRoomNumber(), fValue);
+            infoCell(info, "Hạn T.toán:", fLabel);
+            infoCell(info, inv.getDueDate() != null ? inv.getDueDate().format(DATE) : "—", fValue);
+            doc.add(info);
 
-            PdfPTable tenantTable = new PdfPTable(2);
-            tenantTable.setWidthPercentage(100);
-            tenantTable.setSpacingAfter(16);
-            addInfoRow(tenantTable, "Họ và tên:",   invoice.getTenantName(),   boldSmall, normalFont);
-            addInfoRow(tenantTable, "Khu trọ:",     invoice.getPropertyName(), boldSmall, normalFont);
-            addInfoRow(tenantTable, "Phòng:",       invoice.getRoomNumber(),   boldSmall, normalFont);
-            doc.add(tenantTable);
+            hLine(doc, BORDER_CLR, 0.5f);
+            doc.add(gap(4));
 
             // ── BẢNG CHI TIẾT ────────────────────────────────────────
-            doc.add(new Paragraph("CHI TIẾT HÓA ĐƠN", subTitleFont));
-            doc.add(Chunk.NEWLINE);
+            PdfPTable tbl = new PdfPTable(4);
+            tbl.setWidthPercentage(100);
+            tbl.setWidths(new float[]{3.5f, 1.6f, 2f, 1.8f});
+            tbl.setSpacingAfter(8);
 
-            PdfPTable detailTable = new PdfPTable(4);
-            detailTable.setWidthPercentage(100);
-            detailTable.setWidths(new float[]{3f, 2f, 2f, 2f});
-            detailTable.setSpacingAfter(16);
+            th(tbl, "Khoản mục",  fTH);
+            th(tbl, "Số lượng",   fTH);
+            th(tbl, "Đơn giá",    fTH);
+            th(tbl, "Thành tiền", fTH);
 
-            // Header row
-            Color headerBg = new Color(30, 80, 160);
-            addTableHeader(detailTable, "Khoản mục",    headerFont, headerBg);
-            addTableHeader(detailTable, "Số lượng",     headerFont, headerBg);
-            addTableHeader(detailTable, "Đơn giá",      headerFont, headerBg);
-            addTableHeader(detailTable, "Thành tiền",   headerFont, headerBg);
+            boolean isFirstMonth = inv.getDepositFee() != null
+                    && inv.getDepositFee().compareTo(java.math.BigDecimal.ZERO) > 0;
+            int rowIdx = 0;
 
-            // Tiền phòng
-            addDetailRow(detailTable,
-                    "Tiền phòng tháng " + invoice.getBillingMonth().format(MONTH_FMT),
+            if (isFirstMonth) {
+                td(tbl,
+                    "Tiền đặt cọc (1 tháng)",
                     "1 tháng",
-                    formatVnd(invoice.getRoomFee()),
-                    formatVnd(invoice.getRoomFee()),
-                    normalFont, boldSmall, false);
+                    vnd(inv.getDepositFee()) + " đ",
+                    vnd(inv.getDepositFee()) + " đ",
+                    fCell, fCellBold, rowIdx++ % 2 != 0);
+            }
 
-            // Tiền điện
-            addDetailRow(detailTable,
-                    "Tiền điện\n(Cũ: " + invoice.getElectricOld()
-                            + " → Mới: " + invoice.getElectricNew() + ")",
-                    invoice.getElectricUsed() + " kWh",
-                    formatVnd(invoice.getElectricUnitPrice()) + "/kWh",
-                    formatVnd(invoice.getElectricFee()),
-                    normalFont, boldSmall, true);
+            td(tbl,
+                "Tiền phòng tháng " + inv.getBillingMonth().format(MONTH),
+                "1 tháng",
+                vnd(inv.getRoomFee()) + " đ",
+                vnd(inv.getRoomFee()) + " đ",
+                fCell, fCellBold, rowIdx++ % 2 != 0);
 
-            // Tiền nước
-            addDetailRow(detailTable,
-                    "Tiền nước\n(Cũ: " + invoice.getWaterOld()
-                            + " → Mới: " + invoice.getWaterNew() + ")",
-                    invoice.getWaterUsed() + " m³",
-                    formatVnd(invoice.getWaterUnitPrice()) + "/m³",
-                    formatVnd(invoice.getWaterFee()),
-                    normalFont, boldSmall, false);
+            if (!isFirstMonth) {
+                td(tbl,
+                    "Điện (cũ " + inv.getElectricOld() + " → mới " + inv.getElectricNew() + ")",
+                    inv.getElectricUsed() + " kWh",
+                    vnd(inv.getElectricUnitPrice()) + "/kWh",
+                    vnd(inv.getElectricFee()) + " đ",
+                    fCell, fCellBold, rowIdx++ % 2 != 0);
 
-            // Dịch vụ
-            addDetailRow(detailTable,
-                    "Phí dịch vụ (thang máy, máy giặt, dọn rác)",
-                    invoice.getServicePeople() + " người",
-                    formatVnd(invoice.getServiceUnitPrice()) + "/người",
-                    formatVnd(invoice.getServiceFee()),
-                    normalFont, boldSmall, true);
+                td(tbl,
+                    "Nước (cũ " + inv.getWaterOld() + " → mới " + inv.getWaterNew() + ")",
+                    inv.getWaterUsed() + " m³",
+                    vnd(inv.getWaterUnitPrice()) + "/m³",
+                    vnd(inv.getWaterFee()) + " đ",
+                    fCell, fCellBold, rowIdx++ % 2 != 0);
+            }
 
-            // Mạng
-            addDetailRow(detailTable,
-                    "Phí mạng",
-                    "1 tháng",
-                    formatVnd(invoice.getNetworkUnitPrice()),
-                    formatVnd(invoice.getNetworkFee()),
-                    normalFont, boldSmall, false);
+            td(tbl,
+                "Phí dịch vụ",
+                inv.getServicePeople() + " người",
+                vnd(inv.getServiceUnitPrice()) + "/ng",
+                vnd(inv.getServiceFee()) + " đ",
+                fCell, fCellBold, rowIdx++ % 2 != 0);
 
-            doc.add(detailTable);
+            td(tbl,
+                "Phí mạng",
+                "1 tháng",
+                vnd(inv.getNetworkUnitPrice()) + " đ",
+                vnd(inv.getNetworkFee()) + " đ",
+                fCell, fCellBold, rowIdx % 2 != 0);
 
-            // ── TỔNG TIỀN ────────────────────────────────────────────
-            PdfPTable totalTable = new PdfPTable(2);
-            totalTable.setWidthPercentage(50);
-            totalTable.setHorizontalAlignment(Element.ALIGN_RIGHT);
-            totalTable.setSpacingAfter(20);
+            doc.add(tbl);
 
-            PdfPCell totalLabelCell = new PdfPCell(new Phrase("TỔNG CỘNG:", boldSmall));
-            totalLabelCell.setBorder(Rectangle.TOP);
-            totalLabelCell.setPadding(8);
-            totalTable.addCell(totalLabelCell);
+            // ── TỔNG TIỀN & QR ───────────────────────────────────────
+            PdfPTable bottom = new PdfPTable(2);
+            bottom.setWidthPercentage(100);
+            bottom.setWidths(new float[]{1.6f, 1f});
+            bottom.setSpacingAfter(6);
 
-            PdfPCell totalValueCell = new PdfPCell(
-                    new Phrase(formatVnd(invoice.getTotalAmount()) + " đ", totalFont));
-            totalValueCell.setBorder(Rectangle.TOP);
-            totalValueCell.setPadding(8);
-            totalValueCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
-            totalTable.addCell(totalValueCell);
+            // Ô trái: tổng + trạng thái
+            PdfPCell leftCell = new PdfPCell();
+            leftCell.setBorder(Rectangle.BOX);
+            leftCell.setBorderColor(BORDER_CLR);
+            leftCell.setBackgroundColor(new Color(248, 250, 255));
+            leftCell.setPadding(10);
 
-            doc.add(totalTable);
+            leftCell.addElement(new Paragraph("TỔNG CỘNG", new Font(bold, 7.5f, Font.NORMAL, TEXT_GRAY)));
+            leftCell.addElement(new Paragraph(vnd(inv.getTotalAmount()) + " đ", fTotal));
+            leftCell.addElement(gap(4));
 
-            // ── TRẠNG THÁI ───────────────────────────────────────────
-            Paragraph statusPara = new Paragraph(
-                    "Trạng thái: " + (invoice.getStatus().name().equals("PAID")
-                            ? "✓ ĐÃ THANH TOÁN" : "⚠ CHƯA THANH TOÁN"),
-                    statusFont);
-            statusPara.setAlignment(Element.ALIGN_CENTER);
-            doc.add(statusPara);
+            boolean isPaid    = Invoice.Status.PAID.equals(inv.getStatus());
+            boolean isOverdue = Invoice.Status.OVERDUE.equals(inv.getStatus());
+            Color   stColor   = isPaid ? GREEN : (isOverdue ? RED_TOTAL : ORANGE);
+            String  stText    = isPaid ? "✓ ĐÃ THANH TOÁN" : (isOverdue ? "⚠ QUÁ HẠN" : "⏳ CHƯA THANH TOÁN");
+            leftCell.addElement(new Paragraph(stText, new Font(bold, 9, Font.NORMAL, stColor)));
+
+            if (isPaid && inv.getPaidAt() != null) {
+                leftCell.addElement(gap(3));
+                Font fPaid = new Font(base, 7, Font.NORMAL, TEXT_GRAY);
+                leftCell.addElement(new Paragraph("Thanh toán: " + inv.getPaidAt().format(DT), fPaid));
+                if (inv.getPaymentConfirmedBy() != null) {
+                    leftCell.addElement(new Paragraph("Xác nhận bởi: " + inv.getPaymentConfirmedBy(), fPaid));
+                }
+            }
+            bottom.addCell(leftCell);
+
+            // Ô phải: QR + thông tin ngân hàng
+            PdfPCell rightCell = new PdfPCell();
+            rightCell.setBorder(Rectangle.BOX);
+            rightCell.setBorderColor(BORDER_CLR);
+            rightCell.setBackgroundColor(Color.WHITE);
+            rightCell.setPadding(8);
+            rightCell.setHorizontalAlignment(Element.ALIGN_CENTER);
+            rightCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
+
+            boolean hasBank = owner != null &&
+                    owner.bankName() != null && !owner.bankName().isBlank();
+            boolean hasQr   = owner != null &&
+                    owner.qrCodeUrl() != null && !owner.qrCodeUrl().isBlank();
+
+            if (hasQr || hasBank) {
+                Font fBankTitle = new Font(bold, 7.5f, Font.NORMAL, PRIMARY);
+                Font fBank      = new Font(base, 7.5f, Font.NORMAL, TEXT_DARK);
+                Font fBankBold  = new Font(bold, 7.5f, Font.NORMAL, TEXT_DARK);
+
+                Paragraph payTitle = new Paragraph("THANH TOÁN CHUYỂN KHOẢN", fBankTitle);
+                payTitle.setAlignment(Element.ALIGN_CENTER);
+                rightCell.addElement(payTitle);
+                rightCell.addElement(gap(3));
+
+                if (hasQr) {
+                    Image qr = loadQrImage(owner.qrCodeUrl());
+                    if (qr != null) {
+                        qr.setAlignment(Image.ALIGN_CENTER);
+                        rightCell.addElement(qr);
+                        rightCell.addElement(gap(3));
+                    }
+                }
+
+                if (hasBank) {
+                    Paragraph bName = new Paragraph(owner.bankName(), fBankBold);
+                    bName.setAlignment(Element.ALIGN_CENTER);
+                    rightCell.addElement(bName);
+                }
+                if (owner.bankAccountNumber() != null && !owner.bankAccountNumber().isBlank()) {
+                    Paragraph acct = new Paragraph("STK: " + owner.bankAccountNumber(), fBank);
+                    acct.setAlignment(Element.ALIGN_CENTER);
+                    rightCell.addElement(acct);
+                }
+                if (owner.bankAccountName() != null && !owner.bankAccountName().isBlank()) {
+                    Paragraph acctName = new Paragraph(owner.bankAccountName(), fBankBold);
+                    acctName.setAlignment(Element.ALIGN_CENTER);
+                    rightCell.addElement(acctName);
+                }
+            } else {
+                Paragraph contact = new Paragraph(
+                        "Liên hệ chủ trọ\nđể biết thông tin\nthanh toán",
+                        new Font(base, 7.5f, Font.ITALIC, TEXT_GRAY));
+                contact.setAlignment(Element.ALIGN_CENTER);
+                rightCell.addElement(contact);
+            }
+            bottom.addCell(rightCell);
+            doc.add(bottom);
 
             // ── FOOTER ───────────────────────────────────────────────
-            doc.add(Chunk.NEWLINE);
-            drawHorizontalLine(doc, new Color(200, 200, 200), 0.5f);
-            Font footerFont = new Font(baseFont, 8, Font.ITALIC, new Color(150, 150, 150));
+            hLine(doc, BORDER_CLR, 0.5f);
+            doc.add(gap(3));
             Paragraph footer = new Paragraph(
-                    "Hóa đơn được tạo tự động bởi hệ thống SmartRent. "
-                            + "Mọi thắc mắc vui lòng liên hệ quản lý khu trọ.", footerFont);
+                    "Hóa đơn được tạo tự động bởi SmartRent  •  Liên hệ quản lý khu trọ nếu có thắc mắc",
+                    fFooter);
             footer.setAlignment(Element.ALIGN_CENTER);
             doc.add(footer);
 
@@ -201,74 +283,102 @@ public class PdfServiceImpl implements PdfService {
         }
     }
 
-    // ── Helper methods ───────────────────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────────
 
-    private String loadFontPath(String resourcePath) throws Exception {
-        File file = ResourceUtils.getFile("classpath:" + resourcePath);
-        return file.getAbsolutePath();
+    private String loadFontPath(String res) throws Exception {
+        File f = ResourceUtils.getFile("classpath:" + res);
+        return f.getAbsolutePath();
     }
 
-    private void drawHorizontalLine(Document doc, Color color, float width) throws Exception {
-        PdfPTable line = new PdfPTable(1);
-        line.setWidthPercentage(100);
-        PdfPCell cell = new PdfPCell();
-        cell.setBorderColor(color);
-        cell.setBorderWidthTop(width);
-        cell.setBorderWidthBottom(0);
-        cell.setBorderWidthLeft(0);
-        cell.setBorderWidthRight(0);
-        cell.setFixedHeight(1);
-        line.addCell(cell);
-        doc.add(line);
+    private void hLine(Document doc, Color color, float w) throws Exception {
+        PdfPTable t = new PdfPTable(1);
+        t.setWidthPercentage(100);
+        PdfPCell c = new PdfPCell();
+        c.setBorderColor(color);
+        c.setBorderWidthTop(w);
+        c.setBorderWidthBottom(0);
+        c.setBorderWidthLeft(0);
+        c.setBorderWidthRight(0);
+        c.setFixedHeight(1);
+        t.addCell(c);
+        doc.add(t);
     }
 
-    private void addInfoRow(PdfPTable table, String label, String value,
-                            Font labelFont, Font valueFont) {
-        PdfPCell lc = new PdfPCell(new Phrase(label, labelFont));
-        lc.setBorder(Rectangle.NO_BORDER);
-        lc.setPaddingBottom(4);
-        table.addCell(lc);
-
-        PdfPCell vc = new PdfPCell(new Phrase(value != null ? value : "", valueFont));
-        vc.setBorder(Rectangle.NO_BORDER);
-        vc.setPaddingBottom(4);
-        table.addCell(vc);
+    private Paragraph gap(float h) {
+        Paragraph p = new Paragraph(" ");
+        p.setLeading(h);
+        return p;
     }
 
-    private void addTableHeader(PdfPTable table, String text, Font font, Color bg) {
-        PdfPCell cell = new PdfPCell(new Phrase(text, font));
-        cell.setBackgroundColor(bg);
-        cell.setPadding(8);
-        cell.setHorizontalAlignment(Element.ALIGN_CENTER);
-        table.addCell(cell);
+    private Paragraph rPara(String text, Font font) {
+        Paragraph p = new Paragraph(text, font);
+        p.setAlignment(Element.ALIGN_RIGHT);
+        return p;
     }
 
-    private void addDetailRow(PdfPTable table, String item, String qty,
-                              String unitPrice, String amount,
-                              Font normalFont, Font boldFont, boolean shaded) {
-        Color bg = shaded ? new Color(245, 248, 255) : Color.WHITE;
+    private PdfPCell noBorder() {
+        PdfPCell c = new PdfPCell();
+        c.setBorder(Rectangle.NO_BORDER);
+        c.setPaddingBottom(2);
+        return c;
+    }
 
-        PdfPCell c1 = new PdfPCell(new Phrase(item, normalFont));
-        c1.setPadding(7); c1.setBackgroundColor(bg);
-        table.addCell(c1);
+    private void infoCell(PdfPTable t, String text, Font font) {
+        PdfPCell c = new PdfPCell(new Phrase(text != null ? text : "—", font));
+        c.setBorder(Rectangle.NO_BORDER);
+        c.setPaddingBottom(3);
+        c.setPaddingTop(1);
+        t.addCell(c);
+    }
 
-        PdfPCell c2 = new PdfPCell(new Phrase(qty, normalFont));
-        c2.setPadding(7); c2.setBackgroundColor(bg);
+    private void th(PdfPTable t, String text, Font font) {
+        PdfPCell c = new PdfPCell(new Phrase(text, font));
+        c.setBackgroundColor(PRIMARY);
+        c.setBorderColor(new Color(20, 60, 130));
+        c.setPadding(5);
+        c.setHorizontalAlignment(Element.ALIGN_CENTER);
+        t.addCell(c);
+    }
+
+    private void td(PdfPTable t, String item, String qty, String unitPrice, String amount,
+                    Font nf, Font bf, boolean shaded) {
+        Color bg = shaded ? ROW_ALT : Color.WHITE;
+
+        PdfPCell c1 = new PdfPCell(new Phrase(item, nf));
+        c1.setPadding(5); c1.setBackgroundColor(bg); c1.setBorderColor(BORDER_CLR);
+        t.addCell(c1);
+
+        PdfPCell c2 = new PdfPCell(new Phrase(qty, nf));
+        c2.setPadding(5); c2.setBackgroundColor(bg); c2.setBorderColor(BORDER_CLR);
         c2.setHorizontalAlignment(Element.ALIGN_CENTER);
-        table.addCell(c2);
+        t.addCell(c2);
 
-        PdfPCell c3 = new PdfPCell(new Phrase(unitPrice, normalFont));
-        c3.setPadding(7); c3.setBackgroundColor(bg);
+        PdfPCell c3 = new PdfPCell(new Phrase(unitPrice, nf));
+        c3.setPadding(5); c3.setBackgroundColor(bg); c3.setBorderColor(BORDER_CLR);
         c3.setHorizontalAlignment(Element.ALIGN_RIGHT);
-        table.addCell(c3);
+        t.addCell(c3);
 
-        PdfPCell c4 = new PdfPCell(new Phrase(amount, boldFont));
-        c4.setPadding(7); c4.setBackgroundColor(bg);
+        PdfPCell c4 = new PdfPCell(new Phrase(amount, bf));
+        c4.setPadding(5); c4.setBackgroundColor(bg); c4.setBorderColor(BORDER_CLR);
         c4.setHorizontalAlignment(Element.ALIGN_RIGHT);
-        table.addCell(c4);
+        t.addCell(c4);
     }
 
-    private String formatVnd(java.math.BigDecimal amount) {
+    private Image loadQrImage(String qrCodeUrl) {
+        try {
+            int idx = qrCodeUrl.indexOf("/uploads/");
+            String rel = idx >= 0 ? qrCodeUrl.substring(idx + "/uploads/".length()) : qrCodeUrl;
+            Path p = uploadRootDir.resolve(rel);
+            if (!Files.exists(p)) return null;
+            Image img = Image.getInstance(p.toAbsolutePath().toString());
+            img.scaleToFit(78, 78);
+            return img;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String vnd(java.math.BigDecimal amount) {
         if (amount == null) return "0";
         return VND.format(amount.longValue());
     }
