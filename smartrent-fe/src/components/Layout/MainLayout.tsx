@@ -6,6 +6,7 @@ import RoomPage from '../../pages/RoomPage.tsx';
 import TenantPage from '../../pages/TenantPage.tsx';
 import ContractPage from '../../pages/ContractPage.tsx';
 import InvoicePage from '../../pages/InvoicePage.tsx';
+import ExpensePage from '../../pages/ExpensePage.tsx';
 import AiChatPage from '../../pages/AiChatPage.tsx';
 import ProfilePage from '../../pages/ProfilePage.tsx';
 
@@ -21,6 +22,7 @@ export default function MainLayout() {
           <Route path="/tenants"     element={<TenantPage />} />
           <Route path="/contracts"   element={<ContractPage />} />
           <Route path="/invoices"    element={<InvoicePage />} />
+          <Route path="/expenses"    element={<ExpensePage />} />
           <Route path="/ai"          element={<AiChatPage />} />
           <Route path="/profile"     element={<ProfilePage />} />
         </Routes>

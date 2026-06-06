@@ -326,6 +326,7 @@ public class ContractServiceImpl implements ContractService {
                 .monthlyRent(c.getMonthlyRent())
                 .numberOfPeople(c.getNumberOfPeople())
                 .status(c.getStatus())
+                .depositBalance(c.getDepositBalance())
                 .createdAt(c.getCreatedAt())
                 .build();
     }

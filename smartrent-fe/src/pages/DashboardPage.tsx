@@ -1,42 +1,68 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   Building2, DoorOpen, Receipt, FileText,
   TrendingUp, TrendingDown, AlertTriangle, CheckCircle,
-  Clock, ArrowRight, CalendarDays,
+  Clock, ArrowRight, CalendarDays, Wallet,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { invoiceApi } from '../api/invoiceApi';
 import { contractApi } from '../api/contractApi';
 import { propertyApi } from '../api/propertyApi';
 import { roomApi } from '../api/roomApi';
+import { expenseApi } from '../api/expenseApi';
 import { formatVnd, formatMonth } from '../utils/format';
+import type { ExpenseCategory } from '../types';
+
+const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  MAINTENANCE: 'Sửa chữa',
+  UTILITY:     'Điện / nước',
+  SERVICE:     'Dịch vụ',
+  TAX:         'Thuế',
+  INSURANCE:   'Bảo hiểm',
+  RENOVATION:  'Cải tạo',
+  OTHER:       'Khác',
+};
+
+const CATEGORY_COLORS: Record<ExpenseCategory, string> = {
+  MAINTENANCE: 'bg-orange-100 text-orange-700',
+  UTILITY:     'bg-blue-100 text-blue-700',
+  SERVICE:     'bg-purple-100 text-purple-700',
+  TAX:         'bg-red-100 text-red-700',
+  INSURANCE:   'bg-teal-100 text-teal-700',
+  RENOVATION:  'bg-yellow-100 text-yellow-700',
+  OTHER:       'bg-gray-100 text-gray-700',
+};
 
 export default function DashboardPage() {
   const navigate = useNavigate();
   const username = useAuthStore(s => s.username);
 
-  const { data: propertiesRes } = useQuery({ queryKey: ['properties'], queryFn: () => propertyApi.getAll() });
-  const { data: invoicesRes }   = useQuery({ queryKey: ['invoices'],   queryFn: () => invoiceApi.getAll() });
-  const { data: contractsRes }  = useQuery({ queryKey: ['contracts'],  queryFn: () => contractApi.getAll() });
-  const { data: roomsRes }      = useQuery({ queryKey: ['rooms'],      queryFn: () => roomApi.getAll() });
+  const { data: propertiesRes } = useQuery({ queryKey: ['properties'],      queryFn: () => propertyApi.getAll() });
+  const { data: invoicesRes }   = useQuery({ queryKey: ['invoices'],        queryFn: () => invoiceApi.getAll() });
+  const { data: contractsRes }  = useQuery({ queryKey: ['contracts'],       queryFn: () => contractApi.getAll() });
+  const { data: roomsRes }      = useQuery({ queryKey: ['rooms'],           queryFn: () => roomApi.getAll() });
+  const { data: expensesRes }   = useQuery({ queryKey: ['expenses-all', null], queryFn: () => expenseApi.getAll() });
 
   const properties = propertiesRes?.data.data ?? [];
   const invoices   = invoicesRes?.data.data   ?? [];
   const contracts  = contractsRes?.data.data  ?? [];
   const rooms      = roomsRes?.data.data       ?? [];
+  const expenses   = expensesRes?.data.data    ?? [];
 
-  // ── Helpers thời gian ────────────────────────────────────────────────────
-  const now         = new Date();
-  const toKey       = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  const currentKey  = toKey(now);
-  const lastMonthDt = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastKey     = toKey(lastMonthDt);
-  const diffDays    = (to: Date) => Math.ceil((to.getTime() - now.getTime()) / 86_400_000);
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  const now        = new Date();
+  const toKey      = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const currentKey = toKey(now);
+  const lastKey    = toKey(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  const diffDays   = (to: Date) => Math.ceil((to.getTime() - now.getTime()) / 86_400_000);
+  const pctChange  = (curr: number, prev: number): number | null =>
+    prev > 0 ? Math.round(((curr - prev) / prev) * 100) : null;
 
   // ── Phòng ────────────────────────────────────────────────────────────────
-  const totalRooms    = rooms.length;
+  const totalRooms       = rooms.length;
   const occupiedRooms    = rooms.filter(r => r.status === 'OCCUPIED').length;
   const availableRooms   = rooms.filter(r => r.status === 'AVAILABLE').length;
   const maintenanceRooms = rooms.filter(r => r.status === 'MAINTENANCE').length;
@@ -48,37 +74,58 @@ export default function DashboardPage() {
   const expiring7       = expiringSoon.filter(c => diffDays(new Date(c.endDate)) <= 7);
 
   // ── Hóa đơn ──────────────────────────────────────────────────────────────
-  const overdueInvoices = invoices.filter(i => i.status === 'OVERDUE');
-  const unpaidInvoices  = invoices.filter(i => i.status === 'UNPAID');
-  const allPending      = [...overdueInvoices, ...unpaidInvoices];
+  const overdueInvoices  = invoices.filter(i => i.status === 'OVERDUE');
+  const unpaidInvoices   = invoices.filter(i => i.status === 'UNPAID');
+  const allPending       = [...overdueInvoices, ...unpaidInvoices];
+  const invoicedIds      = new Set(invoices.filter(i => i.billingMonth.startsWith(currentKey)).map(i => i.contractId));
+  const missingInvoices  = activeContracts.filter(c => !invoicedIds.has(c.id));
 
+  // ── Doanh thu ────────────────────────────────────────────────────────────
   const paidThisMonth = invoices
     .filter(i => i.status === 'PAID' && i.billingMonth.startsWith(currentKey))
     .reduce((s, i) => s + i.totalAmount, 0);
   const paidLastMonth = invoices
     .filter(i => i.status === 'PAID' && i.billingMonth.startsWith(lastKey))
     .reduce((s, i) => s + i.totalAmount, 0);
-  const revenueChange = paidLastMonth > 0
-    ? Math.round(((paidThisMonth - paidLastMonth) / paidLastMonth) * 100)
-    : 0;
 
-  // ── Hóa đơn chưa tạo tháng này ───────────────────────────────────────────
-  const invoicedIds     = new Set(invoices.filter(i => i.billingMonth.startsWith(currentKey)).map(i => i.contractId));
-  const missingInvoices = activeContracts.filter(c => !invoicedIds.has(c.id));
+  // ── Chi phí ──────────────────────────────────────────────────────────────
+  const expThisMonth = expenses
+    .filter(e => e.expenseDate.startsWith(currentKey))
+    .reduce((s, e) => s + e.amount, 0);
+  const expLastMonth = expenses
+    .filter(e => e.expenseDate.startsWith(lastKey))
+    .reduce((s, e) => s + e.amount, 0);
 
-  // ── Biểu đồ doanh thu 6 tháng ────────────────────────────────────────────
-  const revenueChart = Array.from({ length: 6 }, (_, i) => {
+  // ── Lợi nhuận ────────────────────────────────────────────────────────────
+  const profitThisMonth = paidThisMonth - expThisMonth;
+  const profitLastMonth = paidLastMonth - expLastMonth;
+  const revChange    = pctChange(paidThisMonth, paidLastMonth);
+  const expChange    = pctChange(expThisMonth, expLastMonth);
+  const profitChange = pctChange(profitThisMonth, profitLastMonth);
+
+  // ── Chi phí tháng này theo danh mục ──────────────────────────────────────
+  const expByCategoryThisMonth = useMemo(() => {
+    const map = new Map<ExpenseCategory, number>();
+    for (const e of expenses.filter(ex => ex.expenseDate.startsWith(currentKey))) {
+      map.set(e.category, (map.get(e.category) ?? 0) + e.amount);
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1]);
+  }, [expenses, currentKey]);
+
+  // ── Biểu đồ 6 tháng ──────────────────────────────────────────────────────
+  const chartData = Array.from({ length: 6 }, (_, i) => {
     const d   = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
     const key = toKey(d);
-    return {
-      month:   `T${d.getMonth() + 1}`,
-      revenue: invoices.filter(inv => inv.status === 'PAID' && inv.billingMonth.startsWith(key))
-                       .reduce((s, inv) => s + inv.totalAmount, 0),
-      current: key === currentKey,
-    };
+    const revenue = invoices
+      .filter(inv => inv.status === 'PAID' && inv.billingMonth.startsWith(key))
+      .reduce((s, inv) => s + inv.totalAmount, 0);
+    const expense = expenses
+      .filter(exp => exp.expenseDate.startsWith(key))
+      .reduce((s, exp) => s + exp.amount, 0);
+    return { month: `T${d.getMonth() + 1}`, revenue, expense };
   });
 
-  // ── Alert banners ─────────────────────────────────────────────────────────
+  // ── Alerts ───────────────────────────────────────────────────────────────
   type Alert = { key: string; color: string; text: string; to: string };
   const alerts: Alert[] = [
     ...(missingInvoices.length > 0 ? [{
@@ -101,7 +148,7 @@ export default function DashboardPage() {
   return (
     <div className="p-6 space-y-5">
 
-      {/* ── Header ──────────────────────────────────────────────────────── */}
+      {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">
@@ -117,7 +164,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Alert banners ───────────────────────────────────────────────── */}
+      {/* ── Alert banners ─────────────────────────────────────────────── */}
       {alerts.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {alerts.map(a => (
@@ -131,10 +178,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── 5 Stat cards ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-5 gap-3">
+      {/* ── 4 Operational KPI cards ────────────────────────────────────── */}
+      <div className="grid grid-cols-4 gap-3">
 
-        {/* Khu trọ */}
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
           <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center mb-3">
             <Building2 className="w-5 h-5 text-blue-600" />
@@ -143,7 +189,6 @@ export default function DashboardPage() {
           <div className="text-xs text-gray-500 mt-0.5">Khu trọ</div>
         </div>
 
-        {/* Phòng + tỷ lệ lấp đầy */}
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
           <div className="w-9 h-9 bg-purple-100 rounded-xl flex items-center justify-center mb-3">
             <DoorOpen className="w-5 h-5 text-purple-600" />
@@ -154,13 +199,14 @@ export default function DashboardPage() {
           </div>
           <div className="text-xs text-gray-500 mt-0.5 mb-2">Phòng đang thuê</div>
           <div className="w-full bg-gray-100 rounded-full h-1.5">
-            <div className="bg-purple-500 h-1.5 rounded-full transition-all"
-              style={{ width: `${occupancyRate}%` }} />
+            <div className="bg-purple-500 h-1.5 rounded-full" style={{ width: `${occupancyRate}%` }} />
           </div>
-          <div className="text-xs text-purple-600 mt-1 font-medium">{occupancyRate}% lấp đầy</div>
+          <div className="flex justify-between text-xs mt-1.5">
+            <span className="text-purple-600 font-medium">{occupancyRate}% lấp đầy</span>
+            {availableRooms > 0 && <span className="text-green-600">{availableRooms} trống</span>}
+          </div>
         </div>
 
-        {/* Hợp đồng */}
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
           <div className="w-9 h-9 bg-green-100 rounded-xl flex items-center justify-center mb-3">
             <FileText className="w-5 h-5 text-green-600" />
@@ -172,7 +218,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Hóa đơn chưa thu */}
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
           <div className="w-9 h-9 bg-red-100 rounded-xl flex items-center justify-center mb-3">
             <Receipt className="w-5 h-5 text-red-500" />
@@ -183,55 +228,103 @@ export default function DashboardPage() {
             <div className="text-xs text-red-500 mt-2 font-medium">{overdueInvoices.length} quá hạn</div>
           )}
         </div>
+      </div>
 
-        {/* Đã thu tháng này */}
+      {/* ── 3 Financial KPI cards ─────────────────────────────────────── */}
+      <div className="grid grid-cols-3 gap-3">
+
+        {/* Doanh thu */}
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-          <div className="w-9 h-9 bg-emerald-100 rounded-xl flex items-center justify-center mb-3">
-            <TrendingUp className="w-5 h-5 text-emerald-600" />
+          <div className="flex items-center justify-between mb-3">
+            <div className="w-9 h-9 bg-emerald-100 rounded-xl flex items-center justify-center">
+              <TrendingUp className="w-5 h-5 text-emerald-600" />
+            </div>
+            <span className="text-xs text-gray-400">T{now.getMonth() + 1}/{now.getFullYear()}</span>
           </div>
-          <div className="text-base font-semibold text-emerald-700 leading-tight">{formatVnd(paidThisMonth)}</div>
-          <div className="text-xs text-gray-500 mt-0.5">Đã thu T{now.getMonth() + 1}</div>
-          {paidLastMonth > 0 && revenueChange !== 0 && (
-            <div className={`flex items-center gap-1 text-xs mt-2 font-medium ${revenueChange > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-              {revenueChange > 0
-                ? <TrendingUp className="w-3 h-3" />
-                : <TrendingDown className="w-3 h-3" />}
-              {revenueChange > 0 ? '+' : ''}{revenueChange}% so T{lastMonthDt.getMonth() + 1}
+          <div className="text-lg font-semibold text-emerald-700">{formatVnd(paidThisMonth)}</div>
+          <div className="text-xs text-gray-500 mt-0.5">Doanh thu đã thu</div>
+          {revChange !== null && (
+            <div className={`flex items-center gap-1 text-xs mt-2 font-medium ${revChange >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+              {revChange >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+              {revChange >= 0 ? '+' : ''}{revChange}% so T{now.getMonth()}
+            </div>
+          )}
+        </div>
+
+        {/* Chi phí */}
+        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-3">
+            <div className="w-9 h-9 bg-rose-100 rounded-xl flex items-center justify-center">
+              <TrendingDown className="w-5 h-5 text-rose-500" />
+            </div>
+            <span className="text-xs text-gray-400">T{now.getMonth() + 1}/{now.getFullYear()}</span>
+          </div>
+          <div className="text-lg font-semibold text-rose-600">{formatVnd(expThisMonth)}</div>
+          <div className="text-xs text-gray-500 mt-0.5">Chi phí vận hành</div>
+          {expChange !== null && (
+            <div className={`flex items-center gap-1 text-xs mt-2 font-medium ${expChange <= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+              {expChange <= 0 ? <TrendingDown className="w-3 h-3" /> : <TrendingUp className="w-3 h-3" />}
+              {expChange >= 0 ? '+' : ''}{expChange}% so T{now.getMonth()}
+            </div>
+          )}
+        </div>
+
+        {/* Lợi nhuận ròng */}
+        <div className={`rounded-2xl p-4 shadow-sm border ${profitThisMonth >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
+          <div className="flex items-center justify-between mb-3">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${profitThisMonth >= 0 ? 'bg-emerald-100' : 'bg-red-100'}`}>
+              <Wallet className={`w-5 h-5 ${profitThisMonth >= 0 ? 'text-emerald-600' : 'text-red-600'}`} />
+            </div>
+            <span className="text-xs text-gray-400">T{now.getMonth() + 1}/{now.getFullYear()}</span>
+          </div>
+          <div className={`text-lg font-semibold ${profitThisMonth >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+            {profitThisMonth < 0 && '-'}{formatVnd(Math.abs(profitThisMonth))}
+          </div>
+          <div className="text-xs text-gray-500 mt-0.5">Lợi nhuận ròng</div>
+          {profitChange !== null && (
+            <div className={`flex items-center gap-1 text-xs mt-2 font-medium ${profitChange >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+              {profitChange >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+              {profitChange >= 0 ? '+' : ''}{profitChange}% so T{now.getMonth()}
             </div>
           )}
         </div>
       </div>
 
-      {/* ── Grid giữa: biểu đồ + hóa đơn ───────────────────────────────── */}
+      {/* ── Biểu đồ + Hóa đơn chưa thu ──────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4">
 
-        {/* Biểu đồ doanh thu 6 tháng */}
+        {/* Biểu đồ doanh thu vs chi phí */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <div className="flex items-center justify-between mb-4">
-            <span className="font-medium text-sm text-gray-900">Doanh thu 6 tháng gần nhất</span>
-            <span className="text-xs text-gray-400">Hóa đơn đã thu</span>
+            <span className="font-medium text-sm text-gray-900">Doanh thu & Chi phí 6 tháng</span>
+            <div className="flex items-center gap-3 text-xs text-gray-500">
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm bg-emerald-400" />Doanh thu
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm bg-rose-400" />Chi phí
+              </span>
+            </div>
           </div>
           <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={revenueChart} barSize={32} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+            <BarChart data={chartData} barGap={4} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
               <XAxis dataKey="month" axisLine={false} tickLine={false}
                 tick={{ fontSize: 11, fill: '#9ca3af' }} />
               <Tooltip
-                formatter={(v) => [formatVnd(Number(v ?? 0)), 'Đã thu']}
+                formatter={(v, name) => [
+                  formatVnd(Number(v ?? 0)),
+                  name === 'revenue' ? 'Doanh thu' : 'Chi phí',
+                ]}
                 contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb', boxShadow: 'none' }}
                 cursor={{ fill: '#f9fafb' }}
               />
-              <Bar
-                dataKey="revenue"
-                shape={({ x, y, width, height, current }: any) => (
-                  <rect x={x} y={y} width={width} height={Math.max(0, height)}
-                        fill={current ? '#059669' : '#a7f3d0'} rx={4} ry={4} />
-                )}
-              />
+              <Bar dataKey="revenue" fill="#34d399" radius={[3, 3, 0, 0]} maxBarSize={22} />
+              <Bar dataKey="expense" fill="#fb7185" radius={[3, 3, 0, 0]} maxBarSize={22} />
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Danh sách hóa đơn chưa thu */}
+        {/* Hóa đơn chưa thu */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-50">
             <div className="flex items-center gap-2">
@@ -260,7 +353,7 @@ export default function DashboardPage() {
                   <div>
                     <div className="text-sm font-medium text-gray-900">Phòng {invoice.roomNumber}</div>
                     <div className="text-xs text-gray-400">
-                      {invoice.tenantName} · Tháng {formatMonth(invoice.billingMonth)}
+                      {invoice.tenantName} · T{formatMonth(invoice.billingMonth)}
                     </div>
                   </div>
                   <div className="text-right">
@@ -280,8 +373,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Grid dưới: hợp đồng + trạng thái phòng ──────────────────────── */}
-      <div className="grid grid-cols-2 gap-4">
+      {/* ── Hợp đồng + Trạng thái phòng + Chi phí danh mục ─────────── */}
+      <div className="grid grid-cols-3 gap-4">
 
         {/* Hợp đồng sắp hết hạn */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -296,7 +389,7 @@ export default function DashboardPage() {
               </span>
               <button onClick={() => navigate('/contracts')}
                 className="text-xs text-primary-700 hover:underline flex items-center gap-0.5">
-                Xem tất cả <ArrowRight className="w-3 h-3" />
+                Xem <ArrowRight className="w-3 h-3" />
               </button>
             </div>
           </div>
@@ -304,7 +397,7 @@ export default function DashboardPage() {
             {expiringSoon.length === 0 ? (
               <div className="flex flex-col items-center py-8 text-gray-400">
                 <CheckCircle className="w-7 h-7 mb-2 text-green-400" />
-                <span className="text-sm">Không có hợp đồng sắp hết hạn</span>
+                <span className="text-sm">Không có sắp hết hạn</span>
               </div>
             ) : (
               expiringSoon.slice(0, 4).map(contract => {
@@ -313,18 +406,13 @@ export default function DashboardPage() {
                   <div key={contract.id} className="flex items-center justify-between px-5 py-2.5">
                     <div>
                       <div className="text-sm font-medium text-gray-900">Phòng {contract.roomNumber}</div>
-                      <div className="text-xs text-gray-400">{contract.tenantName} · {contract.propertyName}</div>
+                      <div className="text-xs text-gray-400">{contract.tenantName}</div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-xs text-gray-400">
-                        {new Date(contract.endDate).toLocaleDateString('vi-VN')}
-                      </div>
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                        d <= 7 ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'
-                      }`}>
-                        Còn {d} ngày
-                      </span>
-                    </div>
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                      d <= 7 ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'
+                    }`}>
+                      Còn {d} ngày
+                    </span>
                   </div>
                 );
               })
@@ -350,7 +438,7 @@ export default function DashboardPage() {
                   <span className="text-xs font-medium text-gray-800">{count} / {totalRooms}</span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-2">
-                  <div className={`${color} h-2 rounded-full transition-all`}
+                  <div className={`${color} h-2 rounded-full`}
                     style={{ width: totalRooms > 0 ? `${(count / totalRooms) * 100}%` : '0%' }} />
                 </div>
               </div>
@@ -369,6 +457,43 @@ export default function DashboardPage() {
               <div className="text-xl font-semibold text-yellow-500">{maintenanceRooms}</div>
               <div className="text-xs text-gray-400 mt-0.5">Bảo trì</div>
             </div>
+          </div>
+        </div>
+
+        {/* Chi phí tháng này theo danh mục */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-50">
+            <div className="flex items-center gap-2">
+              <TrendingDown className="w-4 h-4 text-rose-500" />
+              <span className="font-medium text-sm text-gray-900">Chi phí T{now.getMonth() + 1} theo loại</span>
+            </div>
+            <button onClick={() => navigate('/expenses')}
+              className="text-xs text-primary-700 hover:underline flex items-center gap-0.5">
+              Xem <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="p-4">
+            {expByCategoryThisMonth.length === 0 ? (
+              <div className="flex flex-col items-center py-6 text-gray-400">
+                <CheckCircle className="w-7 h-7 mb-2 text-gray-300" />
+                <span className="text-sm">Chưa có chi phí tháng này</span>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {expByCategoryThisMonth.map(([cat, amt]) => (
+                  <div key={cat} className="flex items-center justify-between">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${CATEGORY_COLORS[cat]}`}>
+                      {CATEGORY_LABELS[cat]}
+                    </span>
+                    <span className="text-sm font-medium text-gray-700">{formatVnd(amt)}</span>
+                  </div>
+                ))}
+                <div className="pt-2.5 border-t border-gray-100 flex items-center justify-between">
+                  <span className="text-xs font-medium text-gray-600">Tổng tháng này</span>
+                  <span className="text-sm font-semibold text-rose-600">{formatVnd(expThisMonth)}</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

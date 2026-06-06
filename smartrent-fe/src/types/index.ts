@@ -111,6 +111,27 @@ export interface Invoice {
   createdAt: string;
 }
 
+export type ExpenseCategory =
+  | 'MAINTENANCE'
+  | 'UTILITY'
+  | 'SERVICE'
+  | 'TAX'
+  | 'INSURANCE'
+  | 'RENOVATION'
+  | 'OTHER';
+
+export interface Expense {
+  id: number;
+  propertyId: number;
+  propertyName: string;
+  category: ExpenseCategory;
+  amount: number;
+  description: string;
+  expenseDate: string;
+  receiptImageUrl?: string | null;
+  createdAt: string;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   message: string;

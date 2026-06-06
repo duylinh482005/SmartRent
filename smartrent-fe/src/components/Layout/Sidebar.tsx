@@ -1,7 +1,7 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, DoorOpen, Users,
-  FileText, Receipt, Bot, LogOut, ChevronRight, UserCircle2
+  FileText, Receipt, Bot, LogOut, ChevronRight, UserCircle2, TrendingDown
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
@@ -13,6 +13,7 @@ const navItems = [
   { to: '/tenants',    icon: Users,           label: 'Khách thuê' },
   { to: '/contracts',  icon: FileText,        label: 'Hợp đồng' },
   { to: '/invoices',   icon: Receipt,         label: 'Hóa đơn' },
+  { to: '/expenses',   icon: TrendingDown,    label: 'Chi phí' },
   { to: '/ai',         icon: Bot,             label: 'AI Assistant' },
 ];
 

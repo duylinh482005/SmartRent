@@ -1,11 +1,13 @@
 package com.smartrent.service.impl;
 
 import com.smartrent.entity.Contract;
+import com.smartrent.entity.Expense;
 import com.smartrent.entity.Invoice;
 import com.smartrent.entity.Property;
 import com.smartrent.entity.Room;
 import com.smartrent.entity.Tenant;
 import com.smartrent.repository.ContractRepository;
+import com.smartrent.repository.ExpenseRepository;
 import com.smartrent.repository.InvoiceRepository;
 import com.smartrent.repository.PropertyRepository;
 import com.smartrent.repository.RoomRepository;
@@ -33,6 +35,7 @@ public class AiContextServiceImpl implements AiContextService {
     private final ContractRepository contractRepository;
     private final TenantRepository   tenantRepository;
     private final PropertyRepository propertyRepository;
+    private final ExpenseRepository  expenseRepository;
 
     private static final DateTimeFormatter DATE_FMT  = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("MM/yyyy");
@@ -66,6 +69,11 @@ public class AiContextServiceImpl implements AiContextService {
             LocalDate historyFrom = YearMonth.now().minusMonths(12).atDay(1);
             List<Invoice> allInvoices = invoiceRepository.findAllNonDeletedSinceWithDetails(historyFrom);
 
+            // Expenses for last 3 months
+            LocalDate expenseFrom = YearMonth.now().minusMonths(2).atDay(1);
+            LocalDate expenseTo   = today;
+            List<Expense> recentExpenses = expenseRepository.findByExpenseDateBetweenAndDeletedFalse(expenseFrom, expenseTo);
+
             // Lookup maps
             Map<Long, List<Room>> roomsByPropertyId = allRooms.stream()
                     .collect(Collectors.groupingBy(r -> r.getProperty().getId()));
@@ -95,6 +103,7 @@ public class AiContextServiceImpl implements AiContextService {
             appendMissingInvoicesSection(ctx, allContracts, allInvoices);
             appendPropertyPerformanceSection(ctx, allProperties, roomsByPropertyId, allInvoices, overdue);
 
+            appendExpenseAndPnLSection(ctx, recentExpenses, allInvoices, allProperties, today);
             appendStatSection(ctx, allRooms, allContracts, unpaid, overdue, allInvoices, today);
 
             String result = ctx.toString();
@@ -541,6 +550,102 @@ public class AiContextServiceImpl implements AiContextService {
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
+
+    private void appendExpenseAndPnLSection(StringBuilder ctx, List<Expense> expenses,
+                                             List<Invoice> allInvoices, List<Property> allProperties,
+                                             LocalDate today) {
+        YearMonth currentMonth = YearMonth.now();
+
+        // Group expenses by property + month
+        Map<Long, Map<YearMonth, List<Expense>>> byPropertyByMonth = new HashMap<>();
+        for (Expense e : expenses) {
+            YearMonth ym = YearMonth.from(e.getExpenseDate());
+            byPropertyByMonth
+                    .computeIfAbsent(e.getProperty().getId(), k -> new HashMap<>())
+                    .computeIfAbsent(ym, k -> new ArrayList<>())
+                    .add(e);
+        }
+
+        // Revenue (PAID) per property per month
+        Map<Long, Map<YearMonth, BigDecimal>> revByPropertyByMonth = new HashMap<>();
+        for (Invoice inv : allInvoices) {
+            if (inv.getStatus() != Invoice.Status.PAID) continue;
+            Long propId = inv.getContract().getRoom().getProperty().getId();
+            YearMonth ym = YearMonth.from(inv.getBillingMonth());
+            revByPropertyByMonth
+                    .computeIfAbsent(propId, k -> new HashMap<>())
+                    .merge(ym, inv.getTotalAmount(), BigDecimal::add);
+        }
+
+        ctx.append("--- CHI PHÍ VẬN HÀNH & LÃI/LỖ (3 THÁNG GẦN NHẤT) ---\n");
+
+        if (expenses.isEmpty()) {
+            ctx.append("Chưa có dữ liệu chi phí.\n\n");
+            return;
+        }
+
+        // P&L summary for current month across all properties
+        BigDecimal totalRevCurrent = BigDecimal.ZERO;
+        BigDecimal totalExpCurrent = BigDecimal.ZERO;
+
+        for (Property p : allProperties) {
+            Map<YearMonth, List<Expense>> monthMap = byPropertyByMonth.getOrDefault(p.getId(), Map.of());
+            Map<YearMonth, BigDecimal>    revMap   = revByPropertyByMonth.getOrDefault(p.getId(), Map.of());
+
+            // Collect months with any data (expenses or revenue)
+            Set<YearMonth> months = new TreeSet<>(Comparator.reverseOrder());
+            months.addAll(monthMap.keySet());
+            months.addAll(revMap.keySet());
+
+            if (months.isEmpty()) continue;
+
+            ctx.append(String.format("• %s\n", p.getName()));
+            for (YearMonth ym : months) {
+                List<Expense> monthExpenses = monthMap.getOrDefault(ym, List.of());
+                BigDecimal totalExp = monthExpenses.stream()
+                        .map(Expense::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal totalRev = revMap.getOrDefault(ym, BigDecimal.ZERO);
+                BigDecimal profit   = totalRev.subtract(totalExp);
+                String sign = profit.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "";
+
+                ctx.append(String.format("  Tháng %s: Thu %,.0fđ | Chi %,.0fđ | Lãi/Lỗ %s%,.0fđ\n",
+                        ym.format(MONTH_FMT), totalRev, totalExp, sign, profit));
+
+                // Category breakdown for months with expenses
+                if (!monthExpenses.isEmpty()) {
+                    Map<Expense.Category, BigDecimal> byCat = new TreeMap<>(Comparator.comparing(Expense.Category::name));
+                    for (Expense e : monthExpenses) {
+                        byCat.merge(e.getCategory(), e.getAmount(), BigDecimal::add);
+                    }
+                    byCat.forEach((cat, amt) ->
+                            ctx.append(String.format("    - %s: %,.0fđ\n", translateExpenseCategory(cat), amt)));
+                }
+
+                if (ym.equals(currentMonth)) {
+                    totalRevCurrent = totalRevCurrent.add(totalRev);
+                    totalExpCurrent = totalExpCurrent.add(totalExp);
+                }
+            }
+        }
+
+        BigDecimal totalProfitCurrent = totalRevCurrent.subtract(totalExpCurrent);
+        String sign = totalProfitCurrent.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "";
+        ctx.append(String.format("  => Tổng tháng %s: Thu %,.0fđ | Chi %,.0fđ | Lãi/Lỗ %s%,.0fđ\n",
+                currentMonth.format(MONTH_FMT), totalRevCurrent, totalExpCurrent, sign, totalProfitCurrent));
+        ctx.append("\n");
+    }
+
+    private String translateExpenseCategory(Expense.Category category) {
+        return switch (category) {
+            case MAINTENANCE -> "Sửa chữa / bảo trì";
+            case UTILITY     -> "Điện / nước chung";
+            case SERVICE     -> "Dịch vụ (vệ sinh, bảo vệ)";
+            case TAX         -> "Thuế";
+            case INSURANCE   -> "Bảo hiểm";
+            case RENOVATION  -> "Cải tạo";
+            case OTHER       -> "Khác";
+        };
+    }
 
     private String translateRoomStatus(Room.Status status) {
         return switch (status) {
