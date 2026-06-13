@@ -10,9 +10,12 @@ import {
   CheckCircle,
   Download,
   Eye,
+  Pencil,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { invoiceApi, type InvoiceRequest } from '../api/invoiceApi';
+import { invoiceApi, type InvoiceRequest, type InvoiceUpdateRequest } from '../api/invoiceApi';
 import { contractApi } from '../api/contractApi';
 import { propertyApi } from '../api/propertyApi';
 import Modal from '../components/ui/Modal';
@@ -29,11 +32,18 @@ const schema = z.object({
   waterNew:     z.coerce.number().min(0, 'Chỉ số phải >= 0'),
 });
 
+const editSchema = z.object({
+  electricNew: z.coerce.number().min(0, 'Chỉ số phải >= 0'),
+  waterNew:    z.coerce.number().min(0, 'Chỉ số phải >= 0'),
+});
+type EditFormValues = z.input<typeof editSchema>;
+type EditFormData   = z.output<typeof editSchema>;
+
 type FormValues = z.input<typeof schema>;
 type FormData = z.output<typeof schema>;
 
 const STATUS_LABELS: Record<Invoice['status'], string> = {
-  UNPAID: 'Chưa thanh toán',
+  UNPAID: 'Sắp quá hạn',
   PAID: 'Đã thanh toán',
   OVERDUE: 'Quá hạn',
 };
@@ -205,6 +215,7 @@ export default function InvoicePage() {
   const defaultBillingMonth = billingMonthOptions[0]?.value ?? '';
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
   const [createPropertyId, setCreatePropertyId] = useState<number | ''>('');
@@ -218,6 +229,8 @@ export default function InvoicePage() {
   const [propertyFilter, setPropertyFilter] = useState('');
   const [roomFilter, setRoomFilter] = useState('');
   const [statusFilters, setStatusFilters] = useState<Invoice['status'][]>([]);
+  const [invoicePage, setInvoicePage] = useState(1);
+  const INVOICE_PAGE_SIZE = 15;
 
   const { data, isLoading } = useQuery({
     queryKey: ['invoices'],
@@ -549,6 +562,28 @@ export default function InvoicePage() {
     createMutation.mutate(form);
   };
 
+  const {
+    register: registerEdit,
+    handleSubmit: handleEditSubmit,
+    reset: resetEdit,
+    formState: { errors: editErrors },
+  } = useForm<EditFormValues, unknown, EditFormData>({ resolver: zodResolver(editSchema) });
+
+  const openEdit = (invoice: Invoice) => {
+    setEditingInvoice(invoice);
+    resetEdit({ electricNew: invoice.electricNew, waterNew: invoice.waterNew });
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: InvoiceUpdateRequest }) =>
+      invoiceApi.update(id, data),
+    onSuccess: () => {
+      toast.success('Cập nhật hóa đơn thành công!');
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      setEditingInvoice(null);
+    },
+  });
+
   const markPaidMutation = useMutation({
     mutationFn: (id: number) => invoiceApi.markAsPaid(id),
     onSuccess: () => {
@@ -629,7 +664,16 @@ export default function InvoicePage() {
     setPropertyFilter('');
     setRoomFilter('');
     setStatusFilters([]);
+    setInvoicePage(1);
   };
+
+  useEffect(() => setInvoicePage(1), [tenantSearch, monthFilter, propertyFilter, roomFilter, statusFilters]);
+
+  const totalInvoicePages = Math.ceil(filteredInvoices.length / INVOICE_PAGE_SIZE);
+  const paginatedInvoices = filteredInvoices.slice(
+    (invoicePage - 1) * INVOICE_PAGE_SIZE,
+    invoicePage * INVOICE_PAGE_SIZE,
+  );
 
   const totalUnpaid = filteredInvoices
     .filter(invoice => invoice.status !== 'PAID')
@@ -780,7 +824,7 @@ export default function InvoicePage() {
                     {NO_MATCH_MESSAGE}
                   </td>
                 </tr>
-              ) : filteredInvoices.map(invoice => {
+              ) : paginatedInvoices.map(invoice => {
                 const dueDate = resolveDueDate(invoice);
 
                 return (
@@ -817,18 +861,15 @@ export default function InvoicePage() {
                           <Eye className="h-3.5 w-3.5 text-gray-500" />
                         </button>
 
-                        <button
-                          onClick={() => handleDownloadPdf(invoice)}
-                          disabled={pdfLoading === invoice.id}
-                          title="Tải PDF"
-                          className="flex h-7 w-7 items-center justify-center rounded-lg transition hover:bg-blue-50"
-                        >
-                          {pdfLoading === invoice.id ? (
-                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
-                          ) : (
-                            <Download className="h-3.5 w-3.5 text-blue-400" />
-                          )}
-                        </button>
+                        {invoice.status === 'UNPAID' && (
+                          <button
+                            onClick={() => openEdit(invoice)}
+                            title="Sửa hóa đơn"
+                            className="flex h-7 w-7 items-center justify-center rounded-lg transition hover:bg-amber-50"
+                          >
+                            <Pencil className="h-3.5 w-3.5 text-amber-500" />
+                          </button>
+                        )}
 
                         {canMarkAsPaid(invoice) && (
                           <button
@@ -855,6 +896,30 @@ export default function InvoicePage() {
               })}
             </tbody>
           </table>
+          {totalInvoicePages > 1 && (
+            <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-white">
+              <span className="text-xs text-gray-500">
+                {(invoicePage - 1) * INVOICE_PAGE_SIZE + 1}–{Math.min(invoicePage * INVOICE_PAGE_SIZE, filteredInvoices.length)} / {filteredInvoices.length} hóa đơn
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setInvoicePage(p => Math.max(1, p - 1))}
+                  disabled={invoicePage === 1}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
+                >
+                  <ChevronLeft className="w-4 h-4 text-gray-600" />
+                </button>
+                <span className="text-xs text-gray-600 px-2">{invoicePage} / {totalInvoicePages}</span>
+                <button
+                  onClick={() => setInvoicePage(p => Math.min(totalInvoicePages, p + 1))}
+                  disabled={invoicePage === totalInvoicePages}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
+                >
+                  <ChevronRight className="w-4 h-4 text-gray-600" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1275,6 +1340,94 @@ export default function InvoicePage() {
               </button>
             </div>
           </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!editingInvoice}
+        title={`Sửa hóa đơn #${editingInvoice?.id} — Phòng ${editingInvoice?.roomNumber}`}
+        onClose={() => setEditingInvoice(null)}
+      >
+        {editingInvoice && (
+          <form
+            onSubmit={handleEditSubmit(data =>
+              updateMutation.mutate({ id: editingInvoice.id, data })
+            )}
+            className="space-y-4"
+          >
+            <div className="rounded-xl bg-gray-50 p-3 text-sm text-gray-600">
+              <div>Khách thuê: <span className="font-medium text-gray-900">{editingInvoice.tenantName}</span></div>
+              <div>Tháng: <span className="font-medium text-gray-900">{formatMonth(editingInvoice.billingMonth)}</span></div>
+            </div>
+
+            <div className="rounded-xl bg-yellow-50 p-4">
+              <div className="mb-3 text-sm font-medium text-yellow-800">Điện</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-xs text-gray-600">Chỉ số đầu kỳ (kWh)</label>
+                  <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-500">
+                    {editingInvoice.electricOld}
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-gray-600">Chỉ số cuối kỳ (kWh)</label>
+                  <input
+                    {...registerEdit('electricNew')}
+                    type="number"
+                    min={0}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                  {editErrors.electricNew && (
+                    <p className="mt-1 text-xs text-red-500">{editErrors.electricNew.message}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-blue-50 p-4">
+              <div className="mb-3 text-sm font-medium text-blue-800">Nước</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-xs text-gray-600">Chỉ số đầu kỳ (m³)</label>
+                  <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-500">
+                    {editingInvoice.waterOld}
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-gray-600">Chỉ số cuối kỳ (m³)</label>
+                  <input
+                    {...registerEdit('waterNew')}
+                    type="number"
+                    min={0}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                  {editErrors.waterNew && (
+                    <p className="mt-1 text-xs text-red-500">{editErrors.waterNew.message}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingInvoice(null)}
+                className="rounded-xl border border-gray-200 px-4 py-2 text-sm transition hover:bg-gray-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                disabled={updateMutation.isPending}
+                className="flex items-center gap-2 rounded-xl bg-primary-800 px-4 py-2 text-sm text-white transition hover:bg-primary-900 disabled:opacity-50"
+              >
+                {updateMutation.isPending && (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                )}
+                Cập nhật
+              </button>
+            </div>
+          </form>
         )}
       </Modal>
 

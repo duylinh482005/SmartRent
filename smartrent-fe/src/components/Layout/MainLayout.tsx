@@ -12,9 +12,9 @@ import ProfilePage from '../../pages/ProfilePage.tsx';
 
 export default function MainLayout() {
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-y-auto">
         <Routes>
           <Route path="/"            element={<DashboardPage />} />
           <Route path="/properties"  element={<PropertyPage />} />

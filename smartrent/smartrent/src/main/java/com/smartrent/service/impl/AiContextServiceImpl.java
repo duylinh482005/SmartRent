@@ -1,5 +1,6 @@
 package com.smartrent.service.impl;
 
+import com.smartrent.dto.response.AiAlertsResponse;
 import com.smartrent.entity.Contract;
 import com.smartrent.entity.Expense;
 import com.smartrent.entity.Invoice;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
@@ -66,7 +68,7 @@ public class AiContextServiceImpl implements AiContextService {
             List<Invoice>  overdue       = invoiceRepository.findAllByStatusWithDetails(Invoice.Status.OVERDUE);
 
             // Historical invoices for trend analysis (13 months window)
-            LocalDate historyFrom = YearMonth.now().minusMonths(12).atDay(1);
+            LocalDate historyFrom = YearMonth.now().minusMonths(6).atDay(1);
             List<Invoice> allInvoices = invoiceRepository.findAllNonDeletedSinceWithDetails(historyFrom);
 
             // Expenses for last 3 months
@@ -90,20 +92,25 @@ public class AiContextServiceImpl implements AiContextService {
             ctx.append("=== DỮ LIỆU HỆ THỐNG QUẢN LÝ PHÒNG TRỌ ===\n");
             ctx.append("Ngày hôm nay: ").append(today.format(DATE_FMT)).append("\n\n");
 
+            Set<Long> tenantIdsWithOverdue = overdue.stream()
+                    .map(i -> i.getContract().getTenant().getId())
+                    .collect(Collectors.toSet());
+
             appendPropertySection(ctx, allProperties, roomsByPropertyId);
-            appendRoomSection(ctx, allRooms, activeByRoomId);
-            appendTenantSection(ctx, allTenants, activeByTenantId);
+            appendTenantSection(ctx, allTenants, activeByTenantId, tenantIdsWithOverdue);
             appendContractSection(ctx, allContracts, today);
             appendInvoiceSection(ctx, unpaid, overdue, today);
+            appendDueSoonSection(ctx, unpaid, today);
 
             // Analytics sections
             appendRevenueHistorySection(ctx, allInvoices);
             appendVacantRoomSection(ctx, allRooms, allContracts, today);
-            appendPaymentBehaviorSection(ctx, allInvoices, overdue, today);
             appendMissingInvoicesSection(ctx, allContracts, allInvoices);
             appendPropertyPerformanceSection(ctx, allProperties, roomsByPropertyId, allInvoices, overdue);
 
+            appendPaymentBehaviorSection(ctx, allInvoices, overdue, today);
             appendExpenseAndPnLSection(ctx, recentExpenses, allInvoices, allProperties, today);
+            appendRevenueForecastSection(ctx, allInvoices, allContracts, today);
             appendStatSection(ctx, allRooms, allContracts, unpaid, overdue, allInvoices, today);
 
             String result = ctx.toString();
@@ -111,6 +118,71 @@ public class AiContextServiceImpl implements AiContextService {
             cachedAt      = System.currentTimeMillis();
             return result;
         }
+    }
+
+    @Override
+    public AiAlertsResponse buildAlerts() {
+        LocalDate today = LocalDate.now();
+        YearMonth currentMonth = YearMonth.now();
+
+        List<Invoice> overdue = invoiceRepository.findAllByStatusWithDetails(Invoice.Status.OVERDUE);
+
+        List<Contract> allActive = contractRepository.findAllNonDeletedWithDetails().stream()
+                .filter(c -> c.getStatus() == Contract.Status.ACTIVE)
+                .toList();
+
+        List<Contract> expiring = allActive.stream()
+                .filter(c -> {
+                    long days = ChronoUnit.DAYS.between(today, c.getEndDate());
+                    return days >= 0 && days <= 3;
+                })
+                .sorted(Comparator.comparing(Contract::getEndDate))
+                .toList();
+
+        List<Invoice> thisMonthInvoices = invoiceRepository.findAllNonDeletedSinceWithDetails(currentMonth.atDay(1));
+        Set<Long> hasInvoice = thisMonthInvoices.stream()
+                .filter(i -> YearMonth.from(i.getBillingMonth()).equals(currentMonth))
+                .map(i -> i.getContract().getId())
+                .collect(Collectors.toSet());
+        int missingCount = (int) allActive.stream()
+                .filter(c -> !hasInvoice.contains(c.getId()))
+                .count();
+
+        List<AiAlertsResponse.AlertItem> alerts = new ArrayList<>();
+
+        if (!overdue.isEmpty()) {
+            alerts.add(AiAlertsResponse.AlertItem.builder()
+                    .type("OVERDUE")
+                    .message(overdue.size() + " hóa đơn đang quá hạn")
+                    .aiMessage("Các hóa đơn nào đang quá hạn? Chi tiết từng trường hợp và tôi cần xử lý thế nào?")
+                    .build());
+        }
+
+        for (Contract c : expiring) {
+            long days = ChronoUnit.DAYS.between(today, c.getEndDate());
+            String when = days == 0 ? "hôm nay" : days == 1 ? "ngày mai" : "trong " + days + " ngày";
+            alerts.add(AiAlertsResponse.AlertItem.builder()
+                    .type("EXPIRING")
+                    .message("HĐ #" + c.getId() + " · " + c.getTenant().getFullName() + " hết hạn " + when)
+                    .aiMessage("Hợp đồng #" + c.getId() + " của " + c.getTenant().getFullName()
+                            + " sắp hết hạn " + when + ". Tôi nên làm gì để giữ khách hoặc chuẩn bị trả phòng?")
+                    .build());
+        }
+
+        if (missingCount > 0) {
+            alerts.add(AiAlertsResponse.AlertItem.builder()
+                    .type("MISSING_INVOICE")
+                    .message(missingCount + " hợp đồng chưa có hóa đơn tháng này")
+                    .aiMessage("Hợp đồng nào chưa được tạo hóa đơn tháng này? Danh sách chi tiết.")
+                    .build());
+        }
+
+        int badgeCount = overdue.size() + expiring.size() + missingCount;
+
+        return AiAlertsResponse.builder()
+                .badgeCount(badgeCount)
+                .alerts(alerts)
+                .build();
     }
 
     // ── Core sections ──────────────────────────────────────────────────────────
@@ -130,25 +202,9 @@ public class AiContextServiceImpl implements AiContextService {
         ctx.append("\n");
     }
 
-    private void appendRoomSection(StringBuilder ctx, List<Room> allRooms,
-                                   Map<Long, Contract> activeByRoomId) {
-        ctx.append("--- TẤT CẢ PHÒNG (").append(allRooms.size()).append(" phòng) ---\n");
-        for (Room r : allRooms) {
-            Contract ac = activeByRoomId.get(r.getId());
-            String tenant = ac != null
-                    ? String.format(" | Khách: %s (SĐT: %s, HĐ #%d)",
-                            ac.getTenant().getFullName(), ac.getTenant().getPhone(), ac.getId())
-                    : "";
-            ctx.append(String.format(
-                    "• Phòng #%d (%s) | Khu: %s | Trạng thái: %s | Giá: %,.0f đ/tháng | DT: %d m²%s\n",
-                    r.getId(), r.getRoomNumber(), r.getProperty().getName(),
-                    translateRoomStatus(r.getStatus()), r.getPrice(), r.getArea(), tenant));
-        }
-        ctx.append("\n");
-    }
-
     private void appendTenantSection(StringBuilder ctx, List<Tenant> tenants,
-                                     Map<Long, Contract> activeByTenantId) {
+                                     Map<Long, Contract> activeByTenantId,
+                                     Set<Long> tenantIdsWithOverdue) {
         ctx.append("--- DANH SÁCH KHÁCH THUÊ (").append(tenants.size()).append(" khách) ---\n");
         for (Tenant t : tenants) {
             Contract ac = activeByTenantId.get(t.getId());
@@ -158,13 +214,24 @@ public class AiContextServiceImpl implements AiContextService {
                             ac.getEndDate().format(DATE_FMT), ac.getMonthlyRent())
                     : " | Không có hợp đồng hiện tại";
             ctx.append(String.format(
-                    "• #%d %s | SĐT: %s | Email: %s | CCCD: %s%s\n",
+                    "• #%d %s | SĐT: %s | %s%s\n",
                     t.getId(), t.getFullName(), t.getPhone(),
-                    t.getEmail() != null ? t.getEmail() : "—",
-                    t.getIdCardNumber() != null ? t.getIdCardNumber() : "—",
+                    riskLabel(t, tenantIdsWithOverdue),
                     info));
         }
         ctx.append("\n");
+    }
+
+    private String riskLabel(Tenant t, Set<Long> tenantIdsWithOverdue) {
+        boolean hasOverdue    = tenantIdsWithOverdue.contains(t.getId());
+        boolean highByCount   = t.getLatePaymentCount() >= 2;
+        boolean highByDays    = t.getTotalLateDays() >= 10;
+        boolean midByCount    = t.getLatePaymentCount() == 1;
+        boolean midByDays     = t.getTotalLateDays() >= 3;
+
+        if (hasOverdue || highByCount || highByDays) return "RỦI RO CAO";
+        if (midByCount || midByDays)                return "TRUNG BÌNH";
+        return "ĐÁNG TIN CẬY";
     }
 
     private void appendContractSection(StringBuilder ctx, List<Contract> allContracts, LocalDate today) {
@@ -185,41 +252,18 @@ public class AiContextServiceImpl implements AiContextService {
         }
         ctx.append("\n");
 
-        List<Contract> closed = allContracts.stream()
-                .filter(c -> c.getStatus() != Contract.Status.ACTIVE)
-                .sorted(Comparator.<Contract, LocalDate>comparing(Contract::getEndDate).reversed())
-                .limit(10)
-                .toList();
-        if (!closed.isEmpty()) {
-            ctx.append("--- HỢP ĐỒNG ĐÃ KẾT THÚC (10 gần nhất) ---\n");
-            for (Contract c : closed) {
-                ctx.append(String.format(
-                        "• HĐ #%d | Phòng: %s - %s | Khách: %s | Trạng thái: %s | %s → %s\n",
-                        c.getId(), c.getRoom().getRoomNumber(), c.getRoom().getProperty().getName(),
-                        c.getTenant().getFullName(), translateContractStatus(c.getStatus()),
-                        c.getStartDate().format(DATE_FMT), c.getEndDate().format(DATE_FMT)));
-            }
-            ctx.append("\n");
-        }
     }
 
     private void appendInvoiceSection(StringBuilder ctx, List<Invoice> unpaid,
                                       List<Invoice> overdue, LocalDate today) {
-        ctx.append("--- HÓA ĐƠN CHƯA THANH TOÁN (").append(unpaid.size()).append(" hóa đơn) ---\n");
-        if (unpaid.isEmpty()) {
-            ctx.append("Không có.\n");
-        } else {
-            for (Invoice i : unpaid) {
-                ctx.append(String.format(
-                        "• HD#%d | Phòng: %s - %s | Khách: %s | Tháng: %s | Tổng: %,.0f đ | Hạn: %s\n",
-                        i.getId(), i.getContract().getRoom().getRoomNumber(),
-                        i.getContract().getRoom().getProperty().getName(),
-                        i.getContract().getTenant().getFullName(),
-                        i.getBillingMonth().format(MONTH_FMT), i.getTotalAmount(),
-                        i.getDueDate() != null ? i.getDueDate().format(DATE_FMT) : "—"));
-            }
-        }
-        ctx.append("\n");
+        BigDecimal totalUnpaid = unpaid.stream().map(Invoice::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        long dueSoon = unpaid.stream()
+                .filter(i -> i.getDueDate() != null && !i.getDueDate().isBefore(today)
+                        && !i.getDueDate().isAfter(today.plusDays(7)))
+                .count();
+        ctx.append(String.format("--- HÓA ĐƠN CHƯA THANH TOÁN: %d hóa đơn | Tổng: %,.0f đ | Đến hạn trong 7 ngày: %d ---\n",
+                unpaid.size(), totalUnpaid, dueSoon));
+        ctx.append("(Chi tiết hóa đơn đến hạn xem section bên dưới)\n\n");
 
         ctx.append("--- HÓA ĐƠN QUÁ HẠN (").append(overdue.size()).append(" hóa đơn) ---\n");
         if (overdue.isEmpty()) {
@@ -239,6 +283,39 @@ public class AiContextServiceImpl implements AiContextService {
         ctx.append("\n");
     }
 
+    private void appendDueSoonSection(StringBuilder ctx, List<Invoice> unpaid, LocalDate today) {
+        LocalDate cutoff = today.plusDays(7);
+        List<Invoice> dueSoon = unpaid.stream()
+                .filter(i -> i.getDueDate() != null
+                        && !i.getDueDate().isBefore(today)
+                        && !i.getDueDate().isAfter(cutoff))
+                .sorted(Comparator.comparing(Invoice::getDueDate))
+                .toList();
+
+        ctx.append("--- HÓA ĐƠN ĐẾN HẠN TRONG 7 NGÀY TỚI (").append(dueSoon.size()).append(" hóa đơn) ---\n");
+        if (dueSoon.isEmpty()) {
+            ctx.append("Không có hóa đơn nào đến hạn trong 7 ngày tới.\n\n");
+            return;
+        }
+
+        for (Invoice i : dueSoon) {
+            long daysLeft = ChronoUnit.DAYS.between(today, i.getDueDate());
+            String urgency = daysLeft == 0 ? "HÔM NAY"
+                    : daysLeft == 1 ? "NGÀY MAI"
+                    : daysLeft + " ngày nữa";
+            ctx.append(String.format(
+                    "• HD#%d | %s | Phòng: %s - %s | Khách: %s | SĐT: %s | Tổng: %,.0f đ | Hạn: %s [%s]\n",
+                    i.getId(), i.getBillingMonth().format(MONTH_FMT),
+                    i.getContract().getRoom().getRoomNumber(),
+                    i.getContract().getRoom().getProperty().getName(),
+                    i.getContract().getTenant().getFullName(),
+                    i.getContract().getTenant().getPhone(),
+                    i.getTotalAmount(),
+                    i.getDueDate().format(DATE_FMT), urgency));
+        }
+        ctx.append("\n");
+    }
+
     // ── Analytics sections ─────────────────────────────────────────────────────
 
     private void appendRevenueHistorySection(StringBuilder ctx, List<Invoice> allInvoices) {
@@ -253,7 +330,7 @@ public class AiContextServiceImpl implements AiContextService {
             }
         }
 
-        ctx.append("--- DOANH THU THEO THÁNG (12 THÁNG GẦN NHẤT) ---\n");
+        ctx.append("--- DOANH THU THEO THÁNG (6 THÁNG GẦN NHẤT) ---\n");
         if (revenueByMonth.isEmpty()) {
             ctx.append("Chưa có dữ liệu doanh thu.\n\n");
             return;
@@ -279,20 +356,8 @@ public class AiContextServiceImpl implements AiContextService {
             ctx.append(String.format("• Tháng %s: %,.0f đ (%d hóa đơn)%s\n",
                     ym.format(MONTH_FMT), rev, count, trend));
         }
-        ctx.append(String.format("  => Tổng 12 tháng: %,.0f đ\n", total12m));
+        ctx.append(String.format("  => Tổng 6 tháng: %,.0f đ\n", total12m));
 
-        // Quarterly summary
-        Map<String, BigDecimal> quarterly = new TreeMap<>(Comparator.reverseOrder());
-        for (Map.Entry<YearMonth, BigDecimal> e : revenueByMonth.entrySet()) {
-            YearMonth ym = e.getKey();
-            String key = "Q" + ((ym.getMonthValue() - 1) / 3 + 1) + "/" + ym.getYear();
-            quarterly.merge(key, e.getValue(), BigDecimal::add);
-        }
-        if (quarterly.size() > 1) {
-            ctx.append("  Theo quý: ");
-            quarterly.forEach((q, v) -> ctx.append(String.format("%s: %,.0f đ  ", q, v)));
-            ctx.append("\n");
-        }
         ctx.append("\n");
     }
 
@@ -506,6 +571,65 @@ public class AiContextServiceImpl implements AiContextService {
         ctx.append("\n");
     }
 
+    private void appendRevenueForecastSection(StringBuilder ctx, List<Invoice> allInvoices,
+                                              List<Contract> allContracts, LocalDate today) {
+        YearMonth currentMonth = YearMonth.now();
+        YearMonth nextMonth    = currentMonth.plusMonths(1);
+        LocalDate nextStart    = nextMonth.atDay(1);
+        LocalDate nextEnd      = nextMonth.atEndOfMonth();
+        YearMonth sixMonthsAgo = currentMonth.minusMonths(6);
+
+        // Collection rate from last 6 complete months (exclude current — in progress)
+        BigDecimal totalBilled    = BigDecimal.ZERO;
+        BigDecimal totalCollected = BigDecimal.ZERO;
+        for (Invoice i : allInvoices) {
+            YearMonth bm = YearMonth.from(i.getBillingMonth());
+            if (bm.isBefore(currentMonth) && !bm.isBefore(sixMonthsAgo)) {
+                totalBilled = totalBilled.add(i.getTotalAmount());
+                if (i.getStatus() == Invoice.Status.PAID)
+                    totalCollected = totalCollected.add(i.getTotalAmount());
+            }
+        }
+        double collectionRate = totalBilled.compareTo(BigDecimal.ZERO) == 0 ? 1.0
+                : totalCollected.divide(totalBilled, 4, RoundingMode.HALF_UP).doubleValue();
+
+        // Contracts still active in next month
+        List<Contract> activeNextMonth = allContracts.stream()
+                .filter(c -> c.getStatus() == Contract.Status.ACTIVE
+                        && !c.getEndDate().isBefore(nextStart))
+                .toList();
+
+        BigDecimal theoretical = activeNextMonth.stream()
+                .map(Contract::getMonthlyRent)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal forecast = theoretical
+                .multiply(BigDecimal.valueOf(collectionRate))
+                .setScale(0, RoundingMode.HALF_UP);
+
+        // Contracts expiring during next month
+        List<Contract> expiringNextMonth = activeNextMonth.stream()
+                .filter(c -> !c.getEndDate().isAfter(nextEnd))
+                .toList();
+
+        ctx.append("--- DỰ BÁO DOANH THU THÁNG ").append(nextMonth.format(MONTH_FMT)).append(" ---\n");
+        ctx.append(String.format("• Lý thuyết (%d HĐ còn hiệu lực): %,.0f đ\n",
+                activeNextMonth.size(), theoretical));
+        ctx.append(String.format("• Tỷ lệ thu thực tế (6 tháng qua): %.1f%%\n", collectionRate * 100));
+        ctx.append(String.format("• Dự báo điều chỉnh: %,.0f đ\n", forecast));
+
+        if (!expiringNextMonth.isEmpty()) {
+            ctx.append(String.format("• Cảnh báo: %d HĐ hết hạn trong tháng %s:\n",
+                    expiringNextMonth.size(), nextMonth.format(MONTH_FMT)));
+            for (Contract c : expiringNextMonth) {
+                ctx.append(String.format("  - HĐ #%d | %s | Phòng %s | Hết hạn %s\n",
+                        c.getId(), c.getTenant().getFullName(),
+                        c.getRoom().getRoomNumber(), c.getEndDate().format(DATE_FMT)));
+            }
+        }
+        ctx.append("\n");
+    }
+
     private void appendStatSection(StringBuilder ctx, List<Room> allRooms, List<Contract> allContracts,
                                    List<Invoice> unpaid, List<Invoice> overdue,
                                    List<Invoice> allInvoices, LocalDate today) {
@@ -611,16 +735,6 @@ public class AiContextServiceImpl implements AiContextService {
                 ctx.append(String.format("  Tháng %s: Thu %,.0fđ | Chi %,.0fđ | Lãi/Lỗ %s%,.0fđ\n",
                         ym.format(MONTH_FMT), totalRev, totalExp, sign, profit));
 
-                // Category breakdown for months with expenses
-                if (!monthExpenses.isEmpty()) {
-                    Map<Expense.Category, BigDecimal> byCat = new TreeMap<>(Comparator.comparing(Expense.Category::name));
-                    for (Expense e : monthExpenses) {
-                        byCat.merge(e.getCategory(), e.getAmount(), BigDecimal::add);
-                    }
-                    byCat.forEach((cat, amt) ->
-                            ctx.append(String.format("    - %s: %,.0fđ\n", translateExpenseCategory(cat), amt)));
-                }
-
                 if (ym.equals(currentMonth)) {
                     totalRevCurrent = totalRevCurrent.add(totalRev);
                     totalExpCurrent = totalExpCurrent.add(totalExp);
@@ -635,18 +749,6 @@ public class AiContextServiceImpl implements AiContextService {
         ctx.append("\n");
     }
 
-    private String translateExpenseCategory(Expense.Category category) {
-        return switch (category) {
-            case MAINTENANCE -> "Sửa chữa / bảo trì";
-            case UTILITY     -> "Điện / nước chung";
-            case SERVICE     -> "Dịch vụ (vệ sinh, bảo vệ)";
-            case TAX         -> "Thuế";
-            case INSURANCE   -> "Bảo hiểm";
-            case RENOVATION  -> "Cải tạo";
-            case OTHER       -> "Khác";
-        };
-    }
-
     private String translateRoomStatus(Room.Status status) {
         return switch (status) {
             case AVAILABLE   -> "Còn trống";
@@ -655,11 +757,4 @@ public class AiContextServiceImpl implements AiContextService {
         };
     }
 
-    private String translateContractStatus(Contract.Status status) {
-        return switch (status) {
-            case ACTIVE     -> "Đang hiệu lực";
-            case EXPIRED    -> "Đã hết hạn";
-            case TERMINATED -> "Đã chấm dứt";
-        };
-    }
 }

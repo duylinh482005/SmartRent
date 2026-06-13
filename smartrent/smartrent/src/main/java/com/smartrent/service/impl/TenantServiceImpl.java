@@ -123,6 +123,8 @@ public class TenantServiceImpl implements TenantService {
                 .phone(t.getPhone())
                 .email(t.getEmail())
                 .idCardNumber(t.getIdCardNumber())
+                .latePaymentCount(t.getLatePaymentCount())
+                .totalLateDays(t.getTotalLateDays())
                 .createdAt(t.getCreatedAt())
                 .build();
     }

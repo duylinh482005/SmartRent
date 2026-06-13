@@ -13,5 +13,7 @@ public class TenantResponse {
     private String phone;
     private String email;
     private String idCardNumber;
+    private int latePaymentCount;
+    private int totalLateDays;
     private LocalDateTime createdAt;
 }

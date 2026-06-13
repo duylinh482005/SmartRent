@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Users, Plus, Pencil, Trash2, Phone, Mail, CreditCard, Search } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Phone, Mail, CreditCard, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useSearchParams } from 'react-router-dom';
 import { contractApi } from '../api/contractApi';
@@ -12,6 +12,7 @@ import Modal from '../components/ui/Modal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import PageHeader from '../components/ui/PageHeader';
 import type { Contract, Tenant } from '../types';
+import { formatVnd } from '../utils/format';
 
 const schema = z.object({
   fullName:     z.string().min(1, 'Họ tên không được để trống'),
@@ -35,6 +36,8 @@ export default function TenantPage() {
   const [deleteTarget, setDeleteTarget] = useState<Tenant | null>(null);
   const [editing, setEditing]           = useState<Tenant | null>(null);
   const [search, setSearch]             = useState('');
+  const [page, setPage]                 = useState(1);
+  const PAGE_SIZE = 10;
 
   const tenantIdParam = searchParams.get('tenantId');
   const parsedTenantId = tenantIdParam ? Number(tenantIdParam) : null;
@@ -64,6 +67,11 @@ export default function TenantPage() {
     t.fullName.toLowerCase().includes(search.toLowerCase()) ||
     t.phone.includes(search)
   );
+
+  useEffect(() => setPage(1), [search]);
+
+  const totalPages = Math.ceil(tenants.length / PAGE_SIZE);
+  const paginatedTenants = tenants.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -139,15 +147,18 @@ export default function TenantPage() {
                 <th className="text-left px-5 py-3 font-medium text-gray-600">Số điện thoại</th>
                 <th className="text-left px-5 py-3 font-medium text-gray-600">Email</th>
                 <th className="text-left px-5 py-3 font-medium text-gray-600">CCCD</th>
+                <th className="text-left px-5 py-3 font-medium text-gray-600">Vi phạm</th>
+                <th className="text-left px-5 py-3 font-medium text-gray-600">Tiền cọc</th>
                 <th className="text-left px-5 py-3 font-medium text-gray-600">Hợp đồng</th>
                 <th className="px-5 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {tenants.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-10 text-gray-400">Không có khách thuê nào</td></tr>
-              ) : tenants.map(t => {
+                <tr><td colSpan={8} className="text-center py-10 text-gray-400">Không có khách thuê nào</td></tr>
+              ) : paginatedTenants.map(t => {
                 const tenantContracts = contractsByTenant[t.id] ?? [];
+                const activeContract = tenantContracts.find(c => c.status === 'ACTIVE');
                 const isHighlighted = highlightedTenantId === t.id;
 
                 return (
@@ -191,6 +202,24 @@ export default function TenantPage() {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-5 py-3">
+                      {t.latePaymentCount === 0 ? (
+                        <span className="text-gray-300">—</span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
+                          {t.latePaymentCount} lần
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
+                      {activeContract == null ? (
+                        <span className="text-gray-300">—</span>
+                      ) : activeContract.depositBalance == null || activeContract.depositBalance === 0 ? (
+                        <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600">Đã hết</span>
+                      ) : (
+                        <span className="text-xs font-medium text-emerald-700">{formatVnd(activeContract.depositBalance)}</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
                       {tenantContracts.length === 0 ? (
                         <span className="text-gray-300">—</span>
                       ) : (
@@ -223,6 +252,30 @@ export default function TenantPage() {
               })}
             </tbody>
           </table>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-white">
+              <span className="text-xs text-gray-500">
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, tenants.length)} / {tenants.length} khách thuê
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
+                >
+                  <ChevronLeft className="w-4 h-4 text-gray-600" />
+                </button>
+                <span className="text-xs text-gray-600 px-2">{page} / {totalPages}</span>
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
+                >
+                  <ChevronRight className="w-4 h-4 text-gray-600" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

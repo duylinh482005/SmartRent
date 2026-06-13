@@ -1,6 +1,7 @@
 package com.smartrent.service.impl;
 
 import com.smartrent.dto.request.InvoiceRequest;
+import com.smartrent.dto.request.InvoiceUpdateRequest;
 import com.smartrent.dto.response.InvoiceResponse;
 import com.smartrent.entity.Contract;
 import com.smartrent.entity.Invoice;
@@ -236,6 +237,50 @@ public class InvoiceServiceImpl implements InvoiceService {
         return invoiceRepository.findByStatusAndDeletedFalse(status).stream()
                 .map(this::toResponse)
                 .toList();
+    }
+
+    @Override
+    public InvoiceResponse update(Long id, InvoiceUpdateRequest request) {
+        Invoice invoice = findById(id);
+
+        if (invoice.getStatus() == Invoice.Status.PAID) {
+            throw new RuntimeException(ERR_EDIT_PAID);
+        }
+        if (invoice.getStatus() == Invoice.Status.OVERDUE) {
+            throw new RuntimeException("Không thể sửa: Hóa đơn đang ở trạng thái Quá hạn");
+        }
+
+        int electricOld = invoice.getElectricOld() != null ? invoice.getElectricOld() : 0;
+        int waterOld    = invoice.getWaterOld()    != null ? invoice.getWaterOld()    : 0;
+
+        if (request.getElectricNew() < electricOld) {
+            throw new RuntimeException(
+                    "Chỉ số điện (" + request.getElectricNew() + ") nhỏ hơn chỉ số đầu kỳ (" + electricOld + ")");
+        }
+        if (request.getWaterNew() < waterOld) {
+            throw new RuntimeException(
+                    "Chỉ số nước (" + request.getWaterNew() + ") nhỏ hơn chỉ số đầu kỳ (" + waterOld + ")");
+        }
+
+        int electricUsed = request.getElectricNew() - electricOld;
+        int waterUsed    = request.getWaterNew()    - waterOld;
+
+        BigDecimal electricFee = invoice.getElectricUnitPrice().multiply(BigDecimal.valueOf(electricUsed));
+        BigDecimal waterFee    = invoice.getWaterUnitPrice().multiply(BigDecimal.valueOf(waterUsed));
+        BigDecimal totalAmount = invoice.getRoomFee()
+                .add(electricFee)
+                .add(waterFee)
+                .add(invoice.getServiceFee())
+                .add(invoice.getNetworkFee())
+                .add(invoice.getDepositFee() != null ? invoice.getDepositFee() : BigDecimal.ZERO);
+
+        invoice.setElectricNew(request.getElectricNew());
+        invoice.setElectricFee(electricFee);
+        invoice.setWaterNew(request.getWaterNew());
+        invoice.setWaterFee(waterFee);
+        invoice.setTotalAmount(totalAmount);
+
+        return toResponse(invoiceRepository.save(invoice));
     }
 
     @Override

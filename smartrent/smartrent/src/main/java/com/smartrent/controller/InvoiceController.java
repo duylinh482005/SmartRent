@@ -1,6 +1,7 @@
 package com.smartrent.controller;
 
 import com.smartrent.dto.request.InvoiceRequest;
+import com.smartrent.dto.request.InvoiceUpdateRequest;
 import com.smartrent.dto.response.InvoiceResponse;
 import com.smartrent.entity.Invoice;
 import com.smartrent.entity.User;
@@ -75,6 +76,13 @@ public class InvoiceController {
                         "attachment; filename=\"" + filename + "\"")
                 .contentType(MediaType.APPLICATION_PDF)
                 .body(pdf);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<ApiResponse<InvoiceResponse>> update(
+            @PathVariable Long id,
+            @Valid @RequestBody InvoiceUpdateRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(invoiceService.update(id, request)));
     }
 
     @PatchMapping("/{id}/mark-paid")

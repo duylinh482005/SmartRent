@@ -3,7 +3,9 @@ import {
   LayoutDashboard, Building2, DoorOpen, Users,
   FileText, Receipt, Bot, LogOut, ChevronRight, UserCircle2, TrendingDown
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../store/authStore';
+import { aiApi } from '../../api/aiApi';
 import toast from 'react-hot-toast';
 
 const navItems = [
@@ -24,6 +26,14 @@ export default function Sidebar() {
   const isProfileActive = location.pathname === '/profile';
   const avatarLetter = username ? username.charAt(0).toUpperCase() : '?';
 
+  const { data: alertsData } = useQuery({
+    queryKey: ['ai-alerts'],
+    queryFn: () => aiApi.getAlerts().then(r => r.data.data),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+  const badgeCount = alertsData?.badgeCount ?? 0;
+
   const handleLogout = () => {
     logout();
     toast.success('Đã đăng xuất');
@@ -31,7 +41,7 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="w-56 min-h-screen bg-primary-900 flex flex-col flex-shrink-0">
+    <aside className="w-56 h-full bg-primary-900 flex flex-col flex-shrink-0">
 
       {/* Logo */}
       <div className="px-5 py-5 border-b border-primary-800">
@@ -65,6 +75,11 @@ export default function Sidebar() {
               <>
                 <Icon className="w-4 h-4 flex-shrink-0" />
                 <span className="flex-1">{label}</span>
+                {to === '/ai' && !isActive && badgeCount > 0 && (
+                  <span className="min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                    {badgeCount > 9 ? '9+' : badgeCount}
+                  </span>
+                )}
                 {isActive && <ChevronRight className="w-3 h-3" />}
               </>
             )}

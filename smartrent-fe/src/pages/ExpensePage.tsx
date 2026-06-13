@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { TrendingDown, Plus, Pencil, Trash2 } from 'lucide-react';
+import { TrendingDown, Plus, Pencil, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { expenseApi, type ExpenseRequest } from '../api/expenseApi';
 import { propertyApi } from '../api/propertyApi';
@@ -60,6 +60,8 @@ export default function ExpensePage() {
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [propertyFilter, setPropertyFilter] = useState('');
   const [monthFilter, setMonthFilter]   = useState('');
+  const [expensePage, setExpensePage]   = useState(1);
+  const EXPENSE_PAGE_SIZE = 15;
 
   const currentMonthKey = toMonthKey(new Date());
 
@@ -118,6 +120,19 @@ export default function ExpensePage() {
     }
     return [...map.entries()].sort((a, b) => b[1] - a[1]);
   }, [expenses]);
+
+  const sortedExpenses = useMemo(
+    () => [...expenses].sort((a, b) => b.expenseDate.localeCompare(a.expenseDate)),
+    [expenses],
+  );
+
+  useEffect(() => setExpensePage(1), [expenses]);
+
+  const totalExpensePages = Math.ceil(sortedExpenses.length / EXPENSE_PAGE_SIZE);
+  const paginatedExpenses = sortedExpenses.slice(
+    (expensePage - 1) * EXPENSE_PAGE_SIZE,
+    expensePage * EXPENSE_PAGE_SIZE,
+  );
 
   const openCreate = () => {
     setEditTarget(null);
@@ -286,9 +301,7 @@ export default function ExpensePage() {
                   </td>
                 </tr>
               ) : (
-                [...expenses]
-                  .sort((a, b) => b.expenseDate.localeCompare(a.expenseDate))
-                  .map(expense => (
+                paginatedExpenses.map(expense => (
                     <tr key={expense.id} className="transition hover:bg-gray-50">
                       <td className="px-5 py-3 text-gray-600">{expense.expenseDate}</td>
                       <td className="px-5 py-3 text-gray-700">{expense.propertyName}</td>
@@ -324,6 +337,30 @@ export default function ExpensePage() {
               )}
             </tbody>
           </table>
+          {totalExpensePages > 1 && (
+            <div className="flex items-center justify-between border-t border-gray-100 bg-white px-5 py-3">
+              <span className="text-xs text-gray-500">
+                {(expensePage - 1) * EXPENSE_PAGE_SIZE + 1}–{Math.min(expensePage * EXPENSE_PAGE_SIZE, sortedExpenses.length)} / {sortedExpenses.length} khoản chi
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setExpensePage(p => Math.max(1, p - 1))}
+                  disabled={expensePage === 1}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg transition hover:bg-gray-100 disabled:opacity-30"
+                >
+                  <ChevronLeft className="h-4 w-4 text-gray-600" />
+                </button>
+                <span className="px-2 text-xs text-gray-600">{expensePage} / {totalExpensePages}</span>
+                <button
+                  onClick={() => setExpensePage(p => Math.min(totalExpensePages, p + 1))}
+                  disabled={expensePage === totalExpensePages}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg transition hover:bg-gray-100 disabled:opacity-30"
+                >
+                  <ChevronRight className="h-4 w-4 text-gray-600" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

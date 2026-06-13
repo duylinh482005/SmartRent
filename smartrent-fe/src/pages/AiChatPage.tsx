@@ -1,8 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
-import { Bot, Send, User, Trash2, Lightbulb, TrendingUp, BarChart2, Bell, Wrench, PenLine, ChevronDown } from 'lucide-react';
+import { Bot, Send, User, Trash2, Lightbulb, TrendingUp, Zap, Bell, AlertTriangle, Clock, FileWarning } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { aiApi } from '../api/aiApi';
-import type { ChatHistoryItem } from '../api/aiApi';
+import type { ChatHistoryItem, AiAlertItem } from '../api/aiApi';
+
+function alertMeta(type: AiAlertItem['type']) {
+  switch (type) {
+    case 'OVERDUE':         return { icon: AlertTriangle, color: 'text-red-600',   bg: 'bg-red-50   hover:bg-red-100   border-red-100' };
+    case 'EXPIRING':        return { icon: Clock,          color: 'text-amber-600', bg: 'bg-amber-50 hover:bg-amber-100 border-amber-100' };
+    case 'MISSING_INVOICE': return { icon: FileWarning,    color: 'text-blue-600',  bg: 'bg-blue-50  hover:bg-blue-100  border-blue-100' };
+  }
+}
 import PageHeader from '../components/ui/PageHeader';
 
 interface Message {
@@ -15,8 +24,6 @@ interface Message {
 interface SuggestionItem {
   label: string;
   message: string;
-  fillOnly?: boolean;
-  subItems?: SuggestionItem[];
 }
 
 interface SuggestionCategory {
@@ -29,56 +36,36 @@ interface SuggestionCategory {
 
 const SUGGESTION_CATEGORIES: SuggestionCategory[] = [
   {
-    id: 'revenue',
-    label: 'Doanh thu',
-    icon: TrendingUp,
-    color: 'text-emerald-600',
-    items: [
-      { label: 'Tháng này so với tháng trước',  message: 'So sánh doanh thu tháng này với tháng trước' },
-      { label: 'Doanh thu theo quý năm nay',    message: 'Doanh thu theo quý năm nay như thế nào?' },
-      { label: 'Tổng quan tài chính và lời khuyên', message: 'Phân tích tình hình tổng thể và cho tôi lời khuyên' },
-    ],
-  },
-  {
-    id: 'analysis',
-    label: 'Phân tích',
-    icon: BarChart2,
-    color: 'text-blue-600',
-    items: [
-      { label: 'Phòng trống lâu nhất',          message: 'Phòng nào đang trống quá lâu? Tôi đang bị mất bao nhiêu tiền?' },
-      { label: 'Khách hay trễ hạn thanh toán',  message: 'Khách thuê nào hay trễ hạn thanh toán?' },
-      { label: 'Khu trọ hiệu quả nhất',         message: 'Khu trọ nào đang hoạt động hiệu quả nhất?' },
-    ],
-  },
-  {
-    id: 'alerts',
-    label: 'Cảnh báo',
+    id: 'status',
+    label: 'Tình hình',
     icon: Bell,
     color: 'text-amber-600',
     items: [
-      { label: 'Hợp đồng sắp hết hạn',          message: 'Hợp đồng nào sắp hết hạn, tôi cần làm gì?' },
-      { label: 'Hóa đơn chưa tạo tháng này',   message: 'Hóa đơn nào chưa được tạo tháng này?' },
-      { label: 'Tổng tiền chưa thu và quá hạn', message: 'Tổng tiền chưa thu và quá hạn là bao nhiêu?' },
+      { label: 'Báo cáo tình hình hôm nay',         message: 'Báo cáo tình hình hôm nay' },
+      { label: 'Việc cần ưu tiên làm hôm nay',      message: 'Hôm nay tôi cần làm gì trước, việc nào cần ưu tiên nhất?' },
+      { label: 'Khách rủi ro cao — nên xử lý thế nào?', message: 'Khách thuê nào đang có rủi ro cao? Tôi nên xử lý thế nào?' },
     ],
   },
   {
-    id: 'actions',
-    label: 'Thao tác',
-    icon: Wrench,
+    id: 'finance',
+    label: 'Tài chính',
+    icon: TrendingUp,
+    color: 'text-emerald-600',
+    items: [
+      { label: 'Tổng quan tài chính và lời khuyên', message: 'Phân tích tình hình tài chính tổng thể và cho tôi lời khuyên cải thiện' },
+      { label: 'Dự báo doanh thu tháng tới',        message: 'Dự báo doanh thu tháng tới dựa trên lịch sử thu thực tế' },
+      { label: 'So sánh hiệu suất các khu trọ',     message: 'So sánh hiệu suất các khu trọ, khu nào đang tốt nhất và khu nào đang kém?' },
+    ],
+  },
+  {
+    id: 'optimize',
+    label: 'Tối ưu',
+    icon: Zap,
     color: 'text-violet-600',
     items: [
-      { label: 'Đánh dấu đã thu hóa đơn',      message: 'Đánh dấu đã thanh toán hóa đơn #',    fillOnly: true },
-      { label: 'Chấm dứt hợp đồng',             message: 'Chấm dứt hợp đồng #',                 fillOnly: true },
-      {
-        label: 'Sửa hợp đồng', message: '', fillOnly: true,
-        subItems: [
-          { label: 'Gia hạn thêm tháng',  message: 'Sửa hợp đồng # thêm 6 tháng', fillOnly: true },
-          { label: 'Đổi giá thuê',        message: 'Sửa hợp đồng # tiền thuê ',    fillOnly: true },
-          { label: 'Đổi số người thuê',   message: 'Sửa hợp đồng # số người ',     fillOnly: true },
-        ],
-      },
-      { label: 'Đặt phòng vào bảo trì',         message: 'Đặt phòng # vào bảo trì',             fillOnly: true },
-      { label: 'Mở lại phòng sau bảo trì',      message: 'Phòng # sửa xong',                    fillOnly: true },
+      { label: 'Phòng trống — đang mất bao nhiêu?', message: 'Phòng trống đang làm tôi mất bao nhiêu tiền mỗi tháng? Tôi nên làm gì để cải thiện?' },
+      { label: 'Lịch sử trễ hạn — tư vấn xử lý',   message: 'Phân tích chi tiết lịch sử trễ hạn của các khách thuê và tư vấn cách xử lý từng người' },
+      { label: 'Hợp đồng sắp hết hạn — giữ khách', message: 'Hợp đồng nào sắp hết hạn? Tôi nên liên hệ ai trước và làm gì để giữ khách?' },
     ],
   },
 ];
@@ -139,31 +126,38 @@ function MarkdownContent({ content }: { content: string }) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AiChatPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 0,
-      role: 'assistant',
-      content: 'Xin chào! Tôi là trợ lý AI của SmartRent. Tôi có thể giúp bạn tra cứu thông tin, phân tích doanh thu, phát hiện vấn đề và đưa ra lời khuyên quản lý phòng trọ. Hãy hỏi tôi bất cứ điều gì!',
-      timestamp: new Date(),
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput]                   = useState('');
   const [loading, setLoading]               = useState(false);
-  const [activeCategory, setActiveCategory] = useState('revenue');
-  const [expandedGroup, setExpandedGroup]   = useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = useState('status');
   const bottomRef                           = useRef<HTMLDivElement>(null);
   const inputRef                            = useRef<HTMLInputElement>(null);
+  const autoGreeted                         = useRef(false);
+
+  const { data: alertsData } = useQuery({
+    queryKey: ['ai-alerts'],
+    queryFn: () => aiApi.getAlerts().then(r => r.data.data),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+  const alerts = alertsData?.alerts ?? [];
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => {
+    if (autoGreeted.current) return;
+    autoGreeted.current = true;
+    sendMessage('Báo cáo tình hình hôm nay');
+  }, []);
+
   const sendMessage = async (text: string) => {
     if (!text.trim() || loading) return;
 
     const history: ChatHistoryItem[] = messages
-      .filter(m => m.id !== 0 && m.content !== '...')
-      .slice(-10)
+      .filter(m => m.content !== '...')
+      .slice(-4)
       .map(m => ({ role: m.role, content: m.content }));
 
     const userMsg: Message = {
@@ -204,15 +198,7 @@ export default function AiChatPage() {
   };
 
   const handleSuggestionClick = (item: SuggestionItem) => {
-    if (item.fillOnly) {
-      setInput(item.message);
-      setTimeout(() => {
-        const el = inputRef.current;
-        if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
-      }, 0);
-    } else {
-      sendMessage(item.message);
-    }
+    sendMessage(item.message);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -221,12 +207,7 @@ export default function AiChatPage() {
   };
 
   const handleClear = () => {
-    setMessages([{
-      id: 0,
-      role: 'assistant',
-      content: 'Cuộc trò chuyện đã được xóa. Tôi có thể giúp gì cho bạn?',
-      timestamp: new Date(),
-    }]);
+    setMessages([]);
     toast.success('Đã xóa cuộc trò chuyện');
   };
 
@@ -306,7 +287,7 @@ export default function AiChatPage() {
                 ref={inputRef}
                 value={input}
                 onChange={e => setInput(e.target.value)}
-                placeholder="Hỏi theo tên, hoặc ra lệnh trực tiếp với #ID..."
+                placeholder="Hỏi về tài chính, khách thuê, phòng trọ..."
                 disabled={loading}
                 className="flex-1 px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-100 transition"
               />
@@ -323,6 +304,35 @@ export default function AiChatPage() {
 
         {/* ── Sidebar ───────────────────────────────────────────────────────── */}
         <div className="w-72 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
+
+          {/* Alert panel — chỉ hiện khi có vấn đề */}
+          {alerts.length > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+                <span className="text-sm font-semibold text-gray-700">Cần xử lý ngay</span>
+                <span className="ml-auto text-xs font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5">
+                  {alerts.length}
+                </span>
+              </div>
+              <div className="p-3 space-y-1.5">
+                {alerts.map((alert, i) => {
+                  const { icon: Icon, color, bg } = alertMeta(alert.type);
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => sendMessage(alert.aiMessage)}
+                      disabled={loading}
+                      className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-all disabled:opacity-50 border flex items-start gap-2 ${bg}`}
+                    >
+                      <Icon className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${color}`} />
+                      <span className={`leading-snug font-medium ${color}`}>{alert.message}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Suggestions */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -359,56 +369,15 @@ export default function AiChatPage() {
             {/* Suggestion items */}
             <div className="p-3 space-y-1.5">
               {activeCat.items.map((item, i) => (
-                <div key={i}>
-                  {item.subItems ? (
-                    <>
-                      <button
-                        onClick={() => setExpandedGroup(expandedGroup === item.label ? null : item.label)}
-                        disabled={loading}
-                        className="w-full text-left px-3 py-2.5 rounded-xl text-xs transition-all disabled:opacity-50 flex items-center gap-2 bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-100 hover:border-violet-200"
-                      >
-                        <PenLine className="w-3 h-3 flex-shrink-0 opacity-60" />
-                        <span className="leading-snug flex-1">{item.label}</span>
-                        <ChevronDown className={`w-3 h-3 flex-shrink-0 opacity-60 transition-transform ${expandedGroup === item.label ? 'rotate-180' : ''}`} />
-                      </button>
-                      {expandedGroup === item.label && (
-                        <div className="ml-4 mt-1 space-y-1">
-                          {item.subItems.map((sub, j) => (
-                            <button
-                              key={j}
-                              onClick={() => handleSuggestionClick(sub)}
-                              disabled={loading}
-                              className="w-full text-left px-3 py-2 rounded-xl text-xs transition-all disabled:opacity-50 flex items-start gap-2 bg-violet-50/70 hover:bg-violet-100 text-violet-600 border border-violet-100 hover:border-violet-200"
-                            >
-                              <span className="leading-snug">{sub.label}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => handleSuggestionClick(item)}
-                      disabled={loading}
-                      className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-all disabled:opacity-50 flex items-start gap-2 group ${
-                        item.fillOnly
-                          ? 'bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-100 hover:border-violet-200'
-                          : 'bg-gray-50 hover:bg-primary-50 text-gray-600 hover:text-primary-800 border border-transparent hover:border-primary-100'
-                      }`}
-                    >
-                      {item.fillOnly && (
-                        <PenLine className="w-3 h-3 mt-0.5 flex-shrink-0 opacity-60" />
-                      )}
-                      <span className="leading-snug">{item.label}</span>
-                    </button>
-                  )}
-                </div>
+                <button
+                  key={i}
+                  onClick={() => handleSuggestionClick(item)}
+                  disabled={loading}
+                  className="w-full text-left px-3 py-2.5 rounded-xl text-xs transition-all disabled:opacity-50 bg-gray-50 hover:bg-primary-50 text-gray-600 hover:text-primary-800 border border-transparent hover:border-primary-100"
+                >
+                  <span className="leading-snug">{item.label}</span>
+                </button>
               ))}
-              {activeCat.id === 'actions' && (
-                <p className="text-xs text-gray-400 px-1 pt-1 leading-snug">
-                  Điền mẫu + #ID, hoặc hỏi theo tên trước rồi ra lệnh
-                </p>
-              )}
             </div>
           </div>
 

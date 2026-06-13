@@ -186,6 +186,7 @@ export default function ContractPage() {
   const [endDateFrom, setEndDateFrom] = useState('');
   const [endDateTo, setEndDateTo] = useState('');
   const [roomSearch, setRoomSearch] = useState('');
+  const [expiringFilter, setExpiringFilter] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['contracts'],
@@ -251,6 +252,11 @@ export default function ContractPage() {
           return false;
         }
 
+        if (expiringFilter) {
+          const d = Math.ceil((new Date(contract.endDate).getTime() - Date.now()) / 86_400_000);
+          if (contract.status !== 'ACTIVE' || d < 0 || d > 30) return false;
+        }
+
         return true;
       })
       .sort((a, b) => {
@@ -262,7 +268,7 @@ export default function ContractPage() {
         if (Number.isNaN(bTime)) return -1;
         return aTime - bTime;
       });
-  }, [contracts, endDateFrom, endDateTo, propertyFilter, roomPropertyMap, roomSearch, statusFilters, tenantSearch]);
+  }, [contracts, endDateFrom, endDateTo, expiringFilter, propertyFilter, roomPropertyMap, roomSearch, statusFilters, tenantSearch]);
 
   const filteredPropertyOptions = useMemo(
     () =>
@@ -431,6 +437,7 @@ export default function ContractPage() {
     setEndDateFrom('');
     setEndDateTo('');
     setRoomSearch('');
+    setExpiringFilter(false);
   };
 
   return (
@@ -538,6 +545,15 @@ export default function ContractPage() {
                     {STATUS_LABELS[status]}
                   </label>
                 ))}
+                <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={expiringFilter}
+                    onChange={e => setExpiringFilter(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-orange-500 focus:ring-orange-400"
+                  />
+                  <span className="font-medium text-orange-600">Sắp hết hạn (≤30 ngày)</span>
+                </label>
               </div>
             </div>
           </div>
