@@ -43,17 +43,19 @@ type FormValues = z.input<typeof schema>;
 type FormData = z.output<typeof schema>;
 
 const STATUS_LABELS: Record<Invoice['status'], string> = {
-  UNPAID: 'Sắp quá hạn',
+  UNPAID: 'Chưa thanh toán',
+  DUE_SOON: 'Sắp quá hạn',
   PAID: 'Đã thanh toán',
   OVERDUE: 'Quá hạn',
 };
 
-const STATUS_OPTIONS: Invoice['status'][] = ['OVERDUE', 'UNPAID', 'PAID'];
+const STATUS_OPTIONS: Invoice['status'][] = ['OVERDUE', 'DUE_SOON', 'UNPAID', 'PAID'];
 
 const STATUS_PRIORITY: Record<Invoice['status'], number> = {
   OVERDUE: 0,
-  UNPAID: 1,
-  PAID: 2,
+  DUE_SOON: 1,
+  UNPAID: 2,
+  PAID: 3,
 };
 
 const NO_MATCH_MESSAGE = 'Không tìm thấy hóa đơn phù hợp';
@@ -153,8 +155,7 @@ const resolveDueDate = (invoice: Invoice): Date | null => {
   return new Date(year, month, 0);
 };
 
-const canMarkAsPaid = (invoice: Invoice) => invoice.status === 'UNPAID' || invoice.status === 'OVERDUE';
-
+const canMarkAsPaid = (invoice: Invoice) => invoice.status === 'UNPAID' || invoice.status === 'DUE_SOON' || invoice.status === 'OVERDUE';
 const getPaidDateLabel = (invoice: Invoice) => {
   if (!invoice.paidAt) return 'không xác định';
   const formatted = formatDate(invoice.paidAt);
@@ -174,7 +175,7 @@ const getDeleteBlockedMessage = (invoice: Invoice): string | null => {
     return 'Không thể xóa: Hóa đơn đang ở trạng thái "Quá hạn"';
   }
 
-  if (invoice.status !== 'UNPAID') {
+  if (invoice.status !== 'UNPAID' && invoice.status !== 'DUE_SOON') {
     return 'Không thể xóa: Trạng thái hóa đơn không hợp lệ';
   }
 
@@ -861,7 +862,7 @@ export default function InvoicePage() {
                           <Eye className="h-3.5 w-3.5 text-gray-500" />
                         </button>
 
-                        {invoice.status === 'UNPAID' && (
+                        {(invoice.status === 'UNPAID' || invoice.status === 'DUE_SOON') && (
                           <button
                             onClick={() => openEdit(invoice)}
                             title="Sửa hóa đơn"

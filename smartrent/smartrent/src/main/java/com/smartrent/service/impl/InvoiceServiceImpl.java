@@ -45,6 +45,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     private static final DateTimeFormatter DELETE_DATE_FMT = DateTimeFormatter.ofPattern("d/M/yyyy");
 
     private static final BigDecimal DAILY_LATE_FEE = new BigDecimal("100000");
+    private static final int DUE_SOON_DAYS = 3;
     private static final int AUTO_TERMINATE_DAYS = 3;
 
     private final InvoiceRepository invoiceRepository;
@@ -291,7 +292,9 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new RuntimeException(ERR_EDIT_PAID);
         }
 
-        if (invoice.getStatus() != Invoice.Status.UNPAID && invoice.getStatus() != Invoice.Status.OVERDUE) {
+        if (invoice.getStatus() != Invoice.Status.UNPAID
+                && invoice.getStatus() != Invoice.Status.DUE_SOON
+                && invoice.getStatus() != Invoice.Status.OVERDUE) {
             throw new RuntimeException("Không thể thanh toán hóa đơn ở trạng thái hiện tại");
         }
 
@@ -321,7 +324,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new RuntimeException(ERR_DELETE_OVERDUE);
         }
 
-        if (invoice.getStatus() != Invoice.Status.UNPAID) {
+        if (invoice.getStatus() != Invoice.Status.UNPAID && invoice.getStatus() != Invoice.Status.DUE_SOON) {
             throw new RuntimeException("Không thể xóa hóa đơn ở trạng thái hiện tại");
         }
 
@@ -338,16 +341,36 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         // Bước 1: Chuyển UNPAID → OVERDUE nếu đã quá dueDate
         List<Invoice> unpaid = invoiceRepository.findByStatusAndDeletedFalse(Invoice.Status.UNPAID);
-        List<Invoice> newlyOverdue = new ArrayList<>();
-        for (Invoice invoice : unpaid) {
-            if (invoice.getDueDate() != null && invoice.getDueDate().isBefore(today)) {
+        List<Invoice> dueSoon = invoiceRepository.findByStatusAndDeletedFalse(Invoice.Status.DUE_SOON);
+        List<Invoice> pendingInvoices = new ArrayList<>();
+        pendingInvoices.addAll(unpaid);
+        pendingInvoices.addAll(dueSoon);
+
+        List<Invoice> statusUpdates = new ArrayList<>();
+        LocalDate dueSoonCutoff = today.plusDays(DUE_SOON_DAYS);
+        for (Invoice invoice : pendingInvoices) {
+            if (invoice.getDueDate() == null) {
+                continue;
+            }
+
+            if (invoice.getDueDate().isBefore(today)) {
                 invoice.setStatus(Invoice.Status.OVERDUE);
-                newlyOverdue.add(invoice);
+                statusUpdates.add(invoice);
                 log.info("[OVERDUE_START] invoiceId={} dueDate={}", invoice.getId(), invoice.getDueDate());
+                } else if (!invoice.getDueDate().isAfter(dueSoonCutoff)
+                    && invoice.getStatus() == Invoice.Status.UNPAID) {
+                invoice.setStatus(Invoice.Status.DUE_SOON);
+                statusUpdates.add(invoice);
+                log.info("[DUE_SOON] invoiceId={} dueDate={}", invoice.getId(), invoice.getDueDate());
+            } else if (invoice.getDueDate().isAfter(dueSoonCutoff)
+                    && invoice.getStatus() == Invoice.Status.DUE_SOON) {
+                invoice.setStatus(Invoice.Status.UNPAID);
+                statusUpdates.add(invoice);
+                log.info("[DUE_SOON_CANCELLED] invoiceId={} dueDate={}", invoice.getId(), invoice.getDueDate());
             }
         }
-        if (!newlyOverdue.isEmpty()) {
-            invoiceRepository.saveAll(newlyOverdue);
+        if (!statusUpdates.isEmpty()) {
+            invoiceRepository.saveAll(statusUpdates);
         }
 
         // Bước 2: Tính tiền phạt cho tất cả hóa đơn OVERDUE, gom theo hợp đồng

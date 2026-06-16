@@ -53,7 +53,8 @@ export default function DashboardPage() {
   // ── Hóa đơn ──────────────────────────────────────────────────────────────
   const overdueInvoices  = invoices.filter(i => i.status === 'OVERDUE');
   const unpaidInvoices   = invoices.filter(i => i.status === 'UNPAID');
-  const allPending       = [...overdueInvoices, ...unpaidInvoices];
+  const dueSoonInvoices  = invoices.filter(i => i.status === 'DUE_SOON');
+  const allPending       = [...overdueInvoices, ...dueSoonInvoices, ...unpaidInvoices];
   const invoicedIds      = new Set(invoices.filter(i => i.billingMonth.startsWith(currentKey)).map(i => i.contractId));
   const missingInvoices  = activeContracts.filter(c => !invoicedIds.has(c.id));
 
@@ -195,7 +196,7 @@ export default function DashboardPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-xs text-gray-500">Sắp quá hạn</span>
-              <span className="text-xs font-medium text-amber-600">{unpaidInvoices.length}</span>
+              <span className="text-xs font-medium text-amber-600">{dueSoonInvoices.length}</span>
             </div>
           </div>
         </div>

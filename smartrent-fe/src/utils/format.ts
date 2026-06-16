@@ -31,10 +31,11 @@ export const getRoomStatusColor = (status: string) => {
 
 export const getInvoiceStatusColor = (status: string) => {
   switch (status) {
-    case 'PAID':    return 'bg-green-100 text-green-700';
-    case 'UNPAID':  return 'bg-red-100 text-red-700';
-    case 'OVERDUE': return 'bg-orange-100 text-orange-700';
-    default:        return 'bg-gray-100 text-gray-700';
+    case 'PAID':     return 'bg-green-100 text-green-700';
+    case 'UNPAID':   return 'bg-gray-100 text-gray-700';
+    case 'DUE_SOON': return 'bg-amber-100 text-amber-700';
+    case 'OVERDUE':  return 'bg-red-100 text-red-700';
+    default:         return 'bg-gray-100 text-gray-700';
   }
 };
 

@@ -127,6 +127,6 @@ public class Invoice extends BaseEntity {
     private List<Payment> payments = new ArrayList<>();
 
     public enum Status {
-        UNPAID, PAID, OVERDUE
+        UNPAID, DUE_SOON, PAID, OVERDUE
     }
 }

@@ -6,34 +6,12 @@
   <component name="ChangeListManager">
     <list default="true" id="a8e7bba7-4802-40ee-932e-460b3b90e7b3" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CLAUDE.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/DEVELOPER_GUIDE.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent-fe/src/api/aiApi.ts" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/api/aiApi.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent-fe/src/api/invoiceApi.ts" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/api/invoiceApi.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent-fe/src/components/Layout/MainLayout.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/components/Layout/MainLayout.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent-fe/src/components/Layout/Sidebar.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/components/Layout/Sidebar.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent-fe/src/pages/AiChatPage.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/pages/AiChatPage.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent-fe/src/pages/ContractPage.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/pages/ContractPage.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/smartrent-fe/src/pages/DashboardPage.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/pages/DashboardPage.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent-fe/src/pages/ExpensePage.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/pages/ExpensePage.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/smartrent-fe/src/pages/InvoicePage.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/pages/InvoicePage.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent-fe/src/pages/TenantPage.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/pages/TenantPage.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/controller/AiController.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/controller/AiController.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/controller/InvoiceController.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/controller/InvoiceController.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/dto/response/TenantResponse.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/dto/response/TenantResponse.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/entity/Contract.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/entity/Contract.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/entity/Expense.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/entity/Expense.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/smartrent-fe/src/types/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/types/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/smartrent-fe/src/utils/format.ts" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent-fe/src/utils/format.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/entity/Invoice.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/entity/Invoice.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/AiContextService.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/AiContextService.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/AiService.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/AiService.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/InvoiceService.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/InvoiceService.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/impl/AiContextServiceImpl.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/impl/AiContextServiceImpl.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/impl/AiServiceImpl.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/impl/AiServiceImpl.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/impl/InvoiceServiceImpl.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/impl/InvoiceServiceImpl.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/impl/TenantServiceImpl.java" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/java/com/smartrent/service/impl/TenantServiceImpl.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/resources/application-groq.properties" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/resources/application-groq.properties" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smartrent/smartrent/src/main/resources/application.properties" beforeDir="false" afterPath="$PROJECT_DIR$/smartrent/smartrent/src/main/resources/application.properties" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

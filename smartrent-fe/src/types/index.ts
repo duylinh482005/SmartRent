@@ -103,7 +103,7 @@ export interface Invoice {
   lateFee: number;
   overdueDays: number;
   totalWithLateFee: number;
-  status: 'UNPAID' | 'PAID' | 'OVERDUE';
+  status: 'UNPAID' | 'DUE_SOON' | 'PAID' | 'OVERDUE';
   dueDate?: string | null;
   paidAt?: string | null;
   paymentConfirmedBy?: string | null;
